@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+import argparse
+from gppop import gppop
+import numpy as np
+import pymc as pm
+import os
+import sys
+try:
+    from pymc import sampling_jax
+except ModuleNotFoundError as e:
+    print(e)
+    print("JAX not installed, falling back to normal sampling")
+    nojax = True
+
+np.random.seed(123456)
+parser = argparse.ArgumentParser(description = 'Fit the Gaussian Process model to the observed source population.', formatter_class = argparse.ArgumentDefaultsHelpFormatter, fromfile_prefix_chars='@')
+parser.add_argument('--mbins', required = True, metavar = 'MBINS', help = 'Path to file contanining the bin egdes in mass.')
+parser.add_argument('--zbins', required = True, metavar = 'ZBINS', help = 'Path to file contanining the bin egdes in redshift.')
+parser.add_argument('--ntune', type = int, required = True, metavar = 'NTUNE', help = 'Number of tuning steps for the sampler.')
+parser.add_argument('--nsteps', type = int, required = True, metavar = 'NSTEPS', help = 'Number of steps to sample post tuning.')
+parser.add_argument('--target_accept', type = float, required = True, metavar = 'TARGET_ACCEPT', help = 'Target acceptance fraction for the sampler.')
+parser.add_argument('--njobs', type = int, required = True, metavar = 'TARGET_ACCEPT', help = 'number of chains to run sampling for')
+parser.add_argument('--weights_file', required = True, metavar = 'WEIGHT_FILE', help = 'Path to file containing posterior sample weights re-weighted to the source frame and uniform in comoving volume.')
+parser.add_argument('--vts_file', required = True, metavar = 'VTS_FILE', help = 'Path to file containing the volume-time sensitivity of binaries in each source bin.')
+parser.add_argument('--output_file', required = True, metavar = 'OUTPUT_FILE', help = 'Path to save output hdf file containing the trace from pymc')
+parser.add_argument('--jax_sampling', required = False, metavar = 'JAX_SAMPLING', help = 'whether to use jax sampling or not',type=bool,default=False)
+parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=None)
+parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=None)
+parser.add_argument('--correlated_inference', required = False, metavar = 'CORRELATED_INFERENCE', help = 'Whether to carry out correlated or uncorrelated mass-redshift inference',type=bool,default=False)
+parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
+args = parser.parse_args()
+
+mbins = np.loadtxt(args.mbins)
+zbins = np.loadtxt(args.zbins) if args.zbins is not None else None
+
+utils = gppop.Utils(mbins,zbins)
+rates = gppop.Rates(mbins,zbins)
+
+log_bin_centers = utils.generate_log_bin_centers()
+deltaLogbin = utils.deltaLogbin()
+tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin)
+
+nbins = len(log_bin_centers)
+
+nz= len(zbins)-1
+nm = int(len(log_bin_centers)/nz)
+
+dist_array = np.zeros(int(nm*(nm+1)/2))
+
+z_bin_centers = log_bin_centers[0::nm,2]
+logm_bin_centers = log_bin_centers[:nm,:2]
+k=0
+for i in range(len(logm_bin_centers)):
+    for j in range(i+1):
+        dist_array[k] = np.linalg.norm(logm_bin_centers[i]-logm_bin_centers[j])
+        k+=1
+
+scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+scale_max = np.log(np.max(dist_array))
+scale_mean_m = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+scale_sd_m = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+
+dist_array = np.zeros(int(nz*(nz+1)/2))
+k=0
+for i in range(len(z_bin_centers)):
+    for j in range(i+1):
+        dist_array[k] = np.linalg.norm(z_bin_centers[i]-z_bin_centers[j])
+        k+=1
+
+scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+scale_max = np.log(np.max(dist_array))
+scale_mean_z = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+scale_sd_z = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+total_vts, total_vt_sigmas = np.loadtxt(args.vts_file,usecols=[0,1],unpack=True)
+weights = np.loadtxt(args.weights_file)
+
+print(args.correlated_inference)
+if args.correlated_inference:
+    gp_model = rates.make_significant_model_3d(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )
+
+else:
+    gp_model = rates.make_significant_model_3d_evolution_only(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_z_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )
+
+
+print(scale_mean_m,scale_sd_m,scale_mean_z,scale_sd_z,args.jax_sampling,args.sigma_sd)
+print(args.output_file)
+with gp_model:
+    if args.jax_sampling and not nojax:
+        trace = pm.sampling_jax.sample_numpyro_nuts(draws=args.nsteps,tune=args.ntune,chains=1 ,target_accept=args.target_accept)
+    else:
+        trace = pm.sample(draws=args.nsteps,tune=args.ntune,chains=args.njobs,target_accept=args.target_accept,discard_tuned_samples=True)
+
+
+trace.to_netcdf(args.output_file)

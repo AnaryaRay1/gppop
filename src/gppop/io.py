@@ -130,7 +130,7 @@ class output_data_products(Post_Proc_Utils):
     according to RnP recommended guidelines
     for a population analysis.
     """
-    def __init__(self,mbins,trace_file,zbins = None,uncor=False):
+    def __init__(self,mbins,zbins,trace_file,uncor=False):
         '''
         Initialize output_data_products class.
         
@@ -145,18 +145,16 @@ class output_data_products(Post_Proc_Utils):
         
         zbins         :: numpy.ndarray
                          1d array containing redshift bin edges
-                         default is None which is for m1,m2 only
-                         inference.
                          
         uncor         :: bool
                          Whether or not to treat samples as results of an uncorrelated
                          mass-redshift inference. Default is False
                          
         '''
-        Post_Proc_Utils.__init__(self,mbins,zbins=zbins)
+        Post_Proc_Utils.__init__(self,mbins,zbins)
         
         self.nbins_m =int((len(mbins)*(len(mbins)-1)*0.5))
-        self.nbins_z = int(len(zbins)-1) if zbins is not None else 1
+        self.nbins_z = int(len(zbins)-1) 
         self.nbins = int((len(mbins)*(len(mbins)-1)*0.5*(len(zbins)-1 if zbins is not None else 1)))
         
         self.trace = az.from_netcdf(trace_file)['posterior']
@@ -383,11 +381,20 @@ class output_data_products(Post_Proc_Utils):
         
         return np.array(mass1), np.array(R_pm1), np.array(mass2), np.array(R_pm2)
     
-    def reweight_injections(self,inj_dataset,thresh,key = 'optimal_snr_net'):
+    def reweight_injections(self,n_corr_sample,nsamples,inj_dataset,thresh,key = 'optimal_snr_net'):
         '''
         FIX ME, to be added soon
         '''
+        # if type(key) == list:
+        #     assert type(thresh)==list and len(thresh)==len(key)
+
+        #     selector=np.where(np.sum(np.array([inj_data_set[k]>=th for k,th in zip(key,thresh)]),axis=0))[0]
+        # else:
+        #     selector=np.where(inj_data_set[key]>=thresh)[0]
+
+        # m1s,m2s,zs = inj_dataset['mass1'][selector],inj_dataset['mass2'][selector],inj_dataset['redshift'][selector]
         pass
+        
     
     
 class parse_input(Vt_Utils):
@@ -396,7 +403,7 @@ class parse_input(Vt_Utils):
     into quantities to be used in GP inference that
     are directly loadable by the driver script.
     """
-    def __init__(self,mbins,posterior_samples,m1m2_given_z_prior,injection_dataset, thresh,key, zbins = None,include_spins = True):
+    def __init__(self,mbins,zbins,posterior_samples,m1m2_given_z_prior,injection_dataset, thresh,key,include_spins = True):
         '''
         Initialize class for parsing inputs.
         
@@ -437,7 +444,7 @@ class parse_input(Vt_Utils):
                                 whether or not to reweight spin distributions of 
                                 injections               
         '''
-        Vt_Utils.__init__(self,mbins,zbins=zbins,include_spins=include_spins)
+        Vt_Utils.__init__(self,mbins,zbins,include_spins=include_spins)
         self.posterior_samples = posterior_samples
         self.injection_dataset = injection_dataset
         self.thresh = thresh

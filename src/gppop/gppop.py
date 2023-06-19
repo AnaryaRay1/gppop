@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-__author__="Anarya Ray, Siddharth Mohite"
+__author__="Anarya Ray"
 
 
 import numpy as np
@@ -21,6 +21,8 @@ def log_prob_spin(sx,sy,sz,m):
     '''
     Function that computes the default spin priors
     used to generate spin-parameters of injections.
+    
+    Author = Siddharth Mohite
     
     Parameters
     ----------
@@ -49,6 +51,8 @@ def reweight_pinjection(tril_weights):
     wrapper around exp such that only non-zero log weights
     are exponentiated.
     
+    Author = Siddharth Mohite
+    
     Parameters
     ----------
     
@@ -73,7 +77,7 @@ class Utils():
     of bins and posterior weights in bins.
     """
     
-    def __init__(self,mbins,zbins = None):
+    def __init__(self,mbins,zbins):
         '''
         Initialize utilities class.
         
@@ -85,30 +89,18 @@ class Utils():
         
         zbins :: numpy.ndarray
                  1d array containing redshift bin edges.
-                 Default is None which will implement a m1-m2
-                 only inference which will assume the redshift 
-                 evolution of the merger rate is uniform in 
-                 Comoving volume and source frame time.
-                 This m1,m2 only inference was carried out
-                 in https://arxiv.org/abs/2111.03634
         
         '''
-        
         self.mbins = mbins
         self.zbins = zbins
-        if self.zbins is None:
-            self.array2d_to_tril = self.arraynd_to_tril
-            self.deltaLogM = self.deltaLogbin
-            self.generate_logM_bin_centers = self.generate_log_bin_centers
     
     def arraynd_to_tril(self,arr):
         '''
         Function that returns the set of lower-triangular
-        entries (m2<=m1) of a 2d matrix or a collection of 2d matrices
-        each binned by m1 and m2. In the m1,m2 only inference only 
-        one set of lower triangular entries are returned.
-        For m1,m2,z inference, it returns multiple sets of lower triangular
-        (m2<=m1) entries, one set corresponding to each redshift bin.
+        entries (m2<=m1) of a collection of 2d matrices
+        each binned by m1 and m2. For the m1,m2,z inference,
+        it returns multiple sets of lower triangular (m2<=m1) 
+        entries, one set corresponding to each redshift bin.
         Uses numpy's tril_indices function.
 
         Parameters
@@ -121,15 +113,11 @@ class Utils():
         lower_tri_array : numpy.ndarray
                           Array of lower-triangular entries.
         '''
-        if self.zbins is None:
-            lower_tri_indices = np.tril_indices(len(arr))
-            return arr[lower_tri_indices]
-        else:
-            array = np.array([])
-            for i in range(len(self.zbins)-1):
-                lower_tri_indices = np.tril_indices(len(arr[:,:,i]))
-                array=np.append(array,arr[:,:,i][lower_tri_indices])
-            return array
+        array = np.array([])
+        for i in range(len(self.zbins)-1):
+            lower_tri_indices = np.tril_indices(len(arr[:,:,i]))
+            array=np.append(array,arr[:,:,i][lower_tri_indices])
+        return array
 
     def compute_weights(self,samples,m1m2_given_z_prior=None):
         '''
@@ -156,48 +144,27 @@ class Utils():
                   inference and of shape(mbins,mbins,zbins) for m1,m2,z
                   inference.
         '''
-        if self.zbins is None:
-            weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1])
-            m1_samples = samples[:,0]
-            m2_samples = samples[:,1]
-            z_samples = samples[:,2]
-            dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
-            m1_indices = np.clip(np.searchsorted(self.mbins,m1_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            m2_indices = np.clip(np.searchsorted(self.mbins,m2_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples) #uniform in comoving-volume
-            ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples) #Jacobian to convert from dL to z 
-            if m1m2_given_z_prior is None:
-                pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
-            else : 
-                pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
-            pz_weight = pz_pop/pz_PE
-            indices = zip(m1_indices,m2_indices)
-            for i,inds in enumerate(indices):
-                weights[inds[0],inds[1]] += pz_weight[i]/(m1_samples[i]*m2_samples[i])
-            weights /= sum(sum(weights))
-            return weights
-        else:
-            weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])
-            m1_samples = samples[:,0]
-            m2_samples = samples[:,1]
-            z_samples = samples[:,2]
-            #uniform in comoving-volume
-            dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
-            m1_indices = np.clip(np.searchsorted(self.mbins,m1_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            m2_indices = np.clip(np.searchsorted(self.mbins,m2_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            z_indices = np.clip(np.searchsorted(self.zbins,z_samples,side='right') - 1,a_min=0,a_max=len(self.zbins)-2)
-            pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples)
-            ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
-            if m1m2_given_z_prior is None:
-                pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
-            else : 
-                pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
-            pz_weight = pz_pop/pz_PE
-            indices = zip(m1_indices,m2_indices,z_indices)
-            for i,inds in enumerate(indices):
-                    weights[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i]*m2_samples[i])
-            weights /= sum(sum(sum(weights)))
-            return weights
+        weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])
+        m1_samples = samples[:,0]
+        m2_samples = samples[:,1]
+        z_samples = samples[:,2]
+        #uniform in comoving-volume
+        dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
+        m1_indices = np.clip(np.searchsorted(self.mbins,m1_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
+        m2_indices = np.clip(np.searchsorted(self.mbins,m2_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
+        z_indices = np.clip(np.searchsorted(self.zbins,z_samples,side='right') - 1,a_min=0,a_max=len(self.zbins)-2)
+        pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples)
+        ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
+        if m1m2_given_z_prior is None:
+            pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+        else : 
+            pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
+        pz_weight = pz_pop/pz_PE
+        indices = zip(m1_indices,m2_indices,z_indices)
+        for i,inds in enumerate(indices):
+                weights[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i]*m2_samples[i])
+        weights /= sum(sum(sum(weights)))
+        return weights
 
     def deltaLogbin(self):
         '''
@@ -208,30 +175,18 @@ class Utils():
         deltaLogbin_array : numpy.ndarray
                             n-D array providing deltaLogbin for each bin.
         '''
-        if(self.zbins is None):
-            m1 = self.mbins
-            m2 = self.mbins
-            deltaLogM_array = np.ones([len(m1)-1,len(m2)-1])
+        m1 = self.mbins
+        m2 = self.mbins
+        z = self.zbins
+        deltaLogbin_array = np.ones([len(m1)-1,len(m2)-1,len(z)-1])
+        for k in range(len(z)-1):
             for i in range(len(m1)-1):
                 for j in range(len(m2)-1):
                     if j != i:
-                        deltaLogM_array[i,j] = np.log(m1[i+1]/m1[i])*np.log(m2[j+1]/m2[j])
+                        deltaLogbin_array[i,j,k] = np.log(m1[i+1]/m1[i])*np.log(m2[j+1]/m2[j])*(z[k+1]-z[k])
                     elif j==i:
-                        deltaLogM_array[i,i] = 0.5*np.log(m1[i+1]/m1[i])*np.log(m2[j+1]/m2[j])
-            return deltaLogM_array
-        else:
-            m1 = self.mbins
-            m2 = self.mbins
-            z = self.zbins
-            deltaLogbin_array = np.ones([len(m1)-1,len(m2)-1,len(z)-1])
-            for k in range(len(z)-1):
-                for i in range(len(m1)-1):
-                    for j in range(len(m2)-1):
-                        if j != i:
-                            deltaLogbin_array[i,j,k] = np.log(m1[i+1]/m1[i])*np.log(m2[j+1]/m2[j])*(z[k+1]-z[k])
-                        elif j==i:
-                            deltaLogbin_array[i,i,k] = 0.5*np.log(m1[i+1]/m1[i])*np.log(m2[j+1]/m2[j])*(z[k+1]-z[k])
-            return deltaLogbin_array
+                        deltaLogbin_array[i,i,k] = 0.5*np.log(m1[i+1]/m1[i])*np.log(m2[j+1]/m2[j])*(z[k+1]-z[k])
+        return deltaLogbin_array
     
     def tril_edges(self):
         '''
@@ -245,27 +200,17 @@ class Utils():
                      an array containing upper and lower edges for each 
                      bin.
         '''
-        if(self.zbins is None):
-            m1 = self.mbins
-            m2 = self.mbins
-            ege_array = []
+        m1 = self.mbins
+        m2 = self.mbins
+        z = self.zbins
+        edge_array = []
+        for k in range(len(z)-1):
             for i in range(len(m1)-1):
                 for j in range(len(m2)-1):
-                    edge_array[i,j] = [[m1[i],m2[j]],[m1[i+1],m2[j+1]]]
-                    
-            return self.array2d_to_tril(edge_array)
-        else:
-            m1 = self.mbins
-            m2 = self.mbins
-            z = self.zbins
-            edge_array = []
-            for k in range(len(z)-1):
-                for i in range(len(m1)-1):
-                    for j in range(len(m2)-1):
-                        if(m2[j]>m1[i]):
-                            continue
-                        edge_array.append([[m1[i],m2[j],z[k]],[m1[i+1],m2[j+1],z[k+1]]])
-            return np.array(edge_array)
+                    if(m2[j]>m1[i]):
+                        continue
+                    edge_array.append([[m1[i],m2[j],z[k]],[m1[i+1],m2[j+1],z[k+1]]])
+        return np.array(edge_array)
 
     def generate_log_bin_centers(self):
         '''
@@ -277,40 +222,26 @@ class Utils():
                                n-D array of the  bin centers in logm1 space and
                                redshift bins in linear space.
         '''
-        if self.zbins is None:
+        zbins = np.log(self.zbins+1.0e-300)
+        for k in range(len(self.zbins)-1):
             log_m1 = np.log(self.mbins)
             log_m2 = np.log(self.mbins)
             nbin = len(log_m1) - 1
             logm1_bin_centres = np.asarray([0.5*(log_m1[i+1]+log_m1[i])for i in range(nbin)])
             logm2_bin_centres = np.asarray([0.5*(log_m2[i+1]+log_m2[i])for i in range(nbin)])
             l1,l2 = np.meshgrid(logm1_bin_centres,logm2_bin_centres)
-            logM = np.concatenate((l1.reshape([nbin*nbin,1]),l2.reshape([nbin*nbin,1])),axis=1)
+            l3 = np.array([[0.5*(np.exp(zbins[k+1])+np.exp(zbins[k]))] for i in range(nbin*nbin)])
+            logM = np.concatenate((l1.reshape([nbin*nbin,1]),l2.reshape([nbin*nbin,1]),l3),axis=1)
             logM_lower_tri = np.asarray([a for a in logM if a[1]<=a[0]])
             logM_lower_tri_sorted = np.asarray([logM_lower_tri[i] for i in np.argsort(logM_lower_tri[:,0],kind='mergesort')])
-            return logM_lower_tri_sorted
-        else:
-            
-            
-            zbins = np.log(self.zbins+1.0e-300)
-            for k in range(len(self.zbins)-1):
-                log_m1 = np.log(self.mbins)
-                log_m2 = np.log(self.mbins)
-                nbin = len(log_m1) - 1
-                logm1_bin_centres = np.asarray([0.5*(log_m1[i+1]+log_m1[i])for i in range(nbin)])
-                logm2_bin_centres = np.asarray([0.5*(log_m2[i+1]+log_m2[i])for i in range(nbin)])
-                l1,l2 = np.meshgrid(logm1_bin_centres,logm2_bin_centres)
-                l3 = np.array([[0.5*(np.exp(zbins[k+1])+np.exp(zbins[k]))] for i in range(nbin*nbin)])
-                logM = np.concatenate((l1.reshape([nbin*nbin,1]),l2.reshape([nbin*nbin,1]),l3),axis=1)
-                logM_lower_tri = np.asarray([a for a in logM if a[1]<=a[0]])
-                logM_lower_tri_sorted = np.asarray([logM_lower_tri[i] for i in np.argsort(logM_lower_tri[:,0],kind='mergesort')])
-                if k == 0:
-                    log_lower_tri_sorted = logM_lower_tri_sorted
-                else:
-                    log_lower_tri_sorted=np.append(log_lower_tri_sorted, logM_lower_tri_sorted,axis =0)
-            return log_lower_tri_sorted
+            if k == 0:
+                log_lower_tri_sorted = logM_lower_tri_sorted
+            else:
+                log_lower_tri_sorted=np.append(log_lower_tri_sorted, logM_lower_tri_sorted,axis =0)
+        return log_lower_tri_sorted
             
                 
-    def construct_1dtond_matrix(self,nbins_m,values,nbins_z=None):
+    def construct_1dtond_matrix(self,nbins_m,values,nbins_z):
         '''
         Inverse of arraynd_to_tril() Returns a n-D
         represenation matrix of a given set of the lower
@@ -326,33 +257,21 @@ class Utils():
             number of mass bins
         nbins_z : int
             number of redshift bins
-            default is None which is for the
-            m1,m2 only inference.
             
         Returns
         -------
         matrix : numpy.ndarray
             n-D symmetric array using values.
         '''
-        if self.zbins is None:
-            k=0
-            matrix = np.zeros([nbins_m,nbins_m])
+        k=0
+
+        matrix = np.zeros([nbins_m,nbins_m,nbins_z])
+        for l in range(nbins_z):
             for i in range(nbins_m):
                 for j in range(i+1):
-                    matrix[i,j] = values[k]
+                    matrix[i,j,l] = values[k]
                     #matrix[j,i] = values[k]
                     k+=1
-        else:
-            assert (nbins_z is not None) and (nbins_z>0)
-            k=0
-            
-            matrix = np.zeros([nbins_m,nbins_m,nbins_z])
-            for l in range(nbins_z):
-                for i in range(nbins_m):
-                    for j in range(i+1):
-                        matrix[i,j,l] = values[k]
-                        #matrix[j,i] = values[k]
-                        k+=1
             
         return matrix
 
@@ -371,25 +290,15 @@ class Utils():
         delta_logm2_array : numpy.ndarray
                         array of delta log(m2)'s
         '''
-        if self.zbins is None:
-            delta_logm2_array = np.zeros([len(self.mbins)-1,len(self.mbins)-1])
+        delta_logm2_array = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])
+        for k in range(len(self.zbins)-1):
             for i in range(len(self.mbins)-1):
                 for j in range(len(self.mbins)-1):
                     if j != i:
-                        delta_logm2_array[i,j] = np.log(self.mbins[j+1]/self.mbins[j])
+                        delta_logm2_array[i,j,k] = np.log(self.mbins[j+1]/self.mbins[j])
                     elif j==i:
-                        delta_logm2_array[i,j] = 0.5*np.log(self.mbins[j+1]/self.mbins[j])
-            return self.array2d_to_tril(delta_logm2_array)
-        else:
-            delta_logm2_array = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])
-            for k in range(len(self.zbins)-1):
-                for i in range(len(self.mbins)-1):
-                    for j in range(len(self.mbins)-1):
-                        if j != i:
-                            delta_logm2_array[i,j,k] = np.log(self.mbins[j+1]/self.mbins[j])
-                        elif j==i:
-                            delta_logm2_array[i,j,k] = 0.5*np.log(self.mbins[j+1]/self.mbins[j])
-            return self.arraynd_to_tril(delta_logm2_array)
+                        delta_logm2_array[i,j,k] = 0.5*np.log(self.mbins[j+1]/self.mbins[j])
+        return self.arraynd_to_tril(delta_logm2_array)
     
     def delta_logm1s(self,mbins):
         '''
@@ -406,25 +315,15 @@ class Utils():
         delta_logm1_array : numpy.ndarray
                             1d array of delta log(m1)'s
         '''
-        if self.zbins is None:
-            delta_logm1_array = np.zeros([len(self.mbins)-1,len(self.mbins)-1])
+        delta_logm1_array = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])
+        for k in range(len(self.zbins)-1):
             for i in range(len(self.mbins)-1):
                 for j in range(len(self.mbins)-1):
                     if j != i:
-                        delta_logm1_array[i,j] = np.log(self.mbins[i+1]/self.mbins[i])
+                        delta_logm1_array[i,j,k] = np.log(self.mbins[i+1]/self.mbins[i])
                     elif j==i:
-                        delta_logm1_array[i,j] = 0.5*np.log(self.mbins[i+1]/self.mbins[i])
-            return self.array2d_to_tril(delta_logm1_array)
-        else:
-            delta_logm1_array = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])
-            for k in range(len(self.zbins)-1):
-                for i in range(len(self.mbins)-1):
-                    for j in range(len(self.mbins)-1):
-                        if j != i:
-                            delta_logm1_array[i,j,k] = np.log(self.mbins[i+1]/self.mbins[i])
-                        elif j==i:
-                            delta_logm1_array[i,j,k] = 0.5*np.log(self.mbins[i+1]/self.mbins[i])
-            return self.arraynd_to_tril(delta_logm1_array)
+                        delta_logm1_array[i,j,k] = 0.5*np.log(self.mbins[i+1]/self.mbins[i])
+        return self.arraynd_to_tril(delta_logm1_array)
     
     def delta_Vc(self):
         '''
@@ -461,7 +360,7 @@ class Post_Proc_Utils(Utils):
     marginal distributions.
     """
     
-    def __init__(self,mbins, zbins=None):
+    def __init__(self,mbins, zbins):
         '''
         Initialize post-processing utilities class.
         
@@ -473,15 +372,9 @@ class Post_Proc_Utils(Utils):
         
         zbins :: numpy.ndarray
                  1d array containing redshift bin edges.
-                 Default is None which will implement a m1-m2
-                 only inference which will assume the redshift 
-                 evolution of the merger rate is uniform in 
-                 Comoving volume and source frame time.
-                 This m1,m2 only inference was carried out
-                 in https://arxiv.org/abs/2111.03634
         '''
         
-        Utils.__init__(self,mbins,zbins=zbins)
+        Utils.__init__(self,mbins,zbins)
     
     def reshape_uncorr(self,n_corr,n_corr_z):
         '''
@@ -547,43 +440,24 @@ class Post_Proc_Utils(Utils):
                       1d array of dR/dm1 evaluated at the above m1 values
         
         '''
-        
-        
         Rpm1 = np.array([])
         mass1 = np.array([])
-        if self.zbins is None:
-            for i in range(len(m1_bins)-1):
-                m1_low = m1_bins[i]
-                m1_high = m1_bins[i+1]
-                m2_low = m2_bins[0]
-                m2_high = m2_bins[-1]
-                m_array = np.linspace(m1_low,m1_high,100)[:-1]
-                idx_array = np.arange(len(log_bin_centers))
-                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
-                       (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))]
-                rate_density_array = n_corr[bin_idx]
-                delta_logm2s = delta_logm2_array[bin_idx]
-                Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_logm2s)/m for m in m_array])
-                mass1 = np.append(mass1,m_array)
-            return mass1,Rpm1
-        
-        else:
-            for i in range(len(m1_bins)-1):
-                m1_low = m1_bins[i]
-                m1_high = m1_bins[i+1]
-                m2_low = m2_bins[0]
-                m2_high = m2_bins[-1]
-                z_high = zbins[-1]
-                z_low = zbins[0]
-                m_array = np.linspace(m1_low,m1_high,100)[:-1]
-                idx_array = np.arange(len(log_bin_centers))
-                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
-                       (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=z_low)&(log_bin_centers[:,2]<=z_high)]
-                rate_density_array = n_corr[bin_idx]
-                delta_logm2s = delta_logm2_array[bin_idx]
-                Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_logm2s)/m for m in m_array])
-                mass1 = np.append(mass1,m_array)
-            return mass1,Rpm1
+        for i in range(len(m1_bins)-1):
+            m1_low = m1_bins[i]
+            m1_high = m1_bins[i+1]
+            m2_low = m2_bins[0]
+            m2_high = m2_bins[-1]
+            z_high = zbins[-1]
+            z_low = zbins[0]
+            m_array = np.linspace(m1_low,m1_high,100)[:-1]
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                   (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=z_low)&(log_bin_centers[:,2]<=z_high)]
+            rate_density_array = n_corr[bin_idx]
+            delta_logm2s = delta_logm2_array[bin_idx]
+            Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_logm2s)/m for m in m_array])
+            mass1 = np.append(mass1,m_array)
+        return mass1,Rpm1
     
     def get_Rpm1_corr(self,n_corr,delta_logm2_array,m1_bins,m2_bins,log_bin_centers,z_low,z_high):
         '''
@@ -624,7 +498,6 @@ class Post_Proc_Utils(Utils):
                       at redshifts belonging to a particular range
         
         '''
-        assert self.zbins is not None
         Rpm1 = np.array([])
         mass1 = np.array([])
         for i in range(len(m1_bins)-1):
@@ -677,32 +550,19 @@ class Post_Proc_Utils(Utils):
         '''
         Rpm2 = np.array([])
         mass2 = np.array([])
-        if self.zbins is None:
-            for i in range(len(m2_bins)-1):
-                m2_low = m2_bins[i]
-                m2_high = m2_bins[i+1]
-                m_array = np.linspace(m2_low,m2_high,100)[:-1]
-                idx_array = np.arange(len(log_bin_centers))
-                bin_idx = idx_array[(log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))]
-                rate_density_array = n_corr[bin_idx]
-                delta_logm1s = delta_logm1_array[bin_idx]
-                Rpm2 = np.append(Rpm2,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
-                mass2 = np.append(mass2,m_array)
-            return mass2,Rpm2
-        else:
-            for i in range(len(m2_bins)-1):
-                m2_low = m2_bins[i]
-                m2_high = m2_bins[i+1]
-                z_high = zbins[-1]
-                z_low = zbins[0]
-                m_array = np.linspace(m2_low,m2_high,100)[:-1]
-                idx_array = np.arange(len(log_bin_centers))
-                bin_idx = idx_array[(log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]<=z_high)&(log_bin_centers[:,2]>=z_low)]
-                rate_density_array = n_corr[bin_idx]
-                delta_logm1s = delta_logm1_array[bin_idx]
-                Rpm2 = np.append(Rpm2,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
-                mass2 = np.append(mass2,m_array)
-            return mass2,Rpm2
+        for i in range(len(m2_bins)-1):
+            m2_low = m2_bins[i]
+            m2_high = m2_bins[i+1]
+            z_high = zbins[-1]
+            z_low = zbins[0]
+            m_array = np.linspace(m2_low,m2_high,100)[:-1]
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]<=z_high)&(log_bin_centers[:,2]>=z_low)]
+            rate_density_array = n_corr[bin_idx]
+            delta_logm1s = delta_logm1_array[bin_idx]
+            Rpm2 = np.append(Rpm2,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
+            mass2 = np.append(mass2,m_array)
+        return mass2,Rpm2
     
     def get_Rpm2_corr(self,n_corr,delta_logm1_array,m2_bins,log_bin_centers,z_low,z_high):
         '''
@@ -743,7 +603,6 @@ class Post_Proc_Utils(Utils):
                       at redshifts belonging to a particular range
         
         '''
-        assert self.zbins is not None
         Rpm2 = np.array([])
         mass2 = np.array([])
         for i in range(len(m2_bins)-1):
@@ -851,19 +710,11 @@ class Post_Proc_Utils(Utils):
         p_m1m2z   : numpy.ndarray
                     1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
         '''
-        if self.zbins is None:
-            p_z = Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs)
-            idx_array = np.arange(len(tril_edges))
-            bin_idx = np.array([idx_array[(tril_edges[:,0,0]<=np.log(m1))&(tril_edges[:,1,0]>=np.log(m1))&
-                       (tril_edges[:,0,1]<=np.log(m2))&(tril_edges[:,1,1]>=np.log(m2))] for m1,m2 in zip(m1s,m2s)])
-            p_m1m2 = (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))*n_corr[bin_idx]/m1s/m2s
-            return p_m1m2
-        else:
-            idx_array = np.arange(len(tril_edges))
-            bin_idx = np.array([idx_array[(tril_edges[:,0,0]<=np.log(m1))&(tril_edges[:,1,0]>=np.log(m1))&
-                       (tril_edges[:,0,1]<=np.log(m2))&(tril_edges[:,1,1]>=np.log(m2))&(tril_edges[:,0,2]<=z)&(log_bin_centers[:,1,2]>=z)] for m1,m2,z in zip(m1s,m2s,zs)])
-            p_m1m2z = (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))*n_corr[bin_idx]/m1s/m2s
-            return p_m1m2z
+        idx_array = np.arange(len(tril_edges))
+        bin_idx = np.array([idx_array[(tril_edges[:,0,0]<=np.log(m1))&(tril_edges[:,1,0]>=np.log(m1))&
+                   (tril_edges[:,0,1]<=np.log(m2))&(tril_edges[:,1,1]>=np.log(m2))&(tril_edges[:,0,2]<=z)&(log_bin_centers[:,1,2]>=z)] for m1,m2,z in zip(m1s,m2s,zs)])
+        p_m1m2z = (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))*n_corr[bin_idx]/m1s/m2s
+        return p_m1m2z
 
 class Vt_Utils(Utils):    
     """
@@ -875,7 +726,7 @@ class Vt_Utils(Utils):
     threshold.
     """
     
-    def __init__(self,mbins,zbins = None,include_spins=True):
+    def __init__(self,mbins,zbins,include_spins=True):
         '''
         Initialize post-processing utilities class.
         
@@ -887,17 +738,11 @@ class Vt_Utils(Utils):
         
         zbins               :: numpy.ndarray
                                1d array containing redshift bin edges.
-                               Default is None which will implement a m1-m2
-                               only inference which will assume the redshift 
-                               evolution of the merger rate is uniform in 
-                               Comoving volume and source frame time.
-                               This m1,m2 only inference was carried out
-                               in https://arxiv.org/abs/2111.03634
                             
         include_spins       :: bool
                                whether or not to reweight spin distributions
         '''
-        Utils.__init__(self,mbins,zbins=zbins)
+        Utils.__init__(self,mbins,zbins)
         self.include_spins = include_spins
 
     def log_reweight_pinjection_mixture(self,m1, m2, z,s1x, s1y, s1z, s2x, s2y, s2z, pdraw, mix_weights):
@@ -961,35 +806,20 @@ class Vt_Utils(Utils):
         '''
         if(not self.include_spins):
             s1x=s2x=s1y=s2y=s1z=s2z=1.
-        
-        
-        if self.zbins is None:
-            nbins = int(len(self.mbins)*(len(self.mbins)-1)/2)
-            tril_weights = np.zeros(nbins)
-            if (m1<self.mbins[0])|(m2<self.mbins[0])|(m1>self.mbins[-1])|(m2>self.mbins[-1]):
+
+        nbins = int(len(self.mbins)*(len(self.mbins)-1)/2)*(len(self.zbins)-1)
+        tril_weights = np.zeros(nbins)
+        if (m1<self.mbins[0])|(m2<self.mbins[0])|(m1>self.mbins[-1])|(m2>self.mbins[-1])|(z<self.zbins[0])|(z>self.zbins[-1]):
                 return tril_weights
-            weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1])
-            m1_idx = np.clip(np.searchsorted(self.mbins,m1,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            m2_idx = np.clip(np.searchsorted(self.mbins,m2,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            log_dVdz = np.log(4*np.pi) + np.log(Planck15.differential_comoving_volume(z).to(u.Gpc**3/u.sr).value)
-            log_time_dilation = -np.log1p(z)
-            log_p_s1s2 = log_prob_spin(s1x,s1y,s1z,m1) + log_prob_spin(s2x,s2y,s2z,m2)
-            weights[m1_idx,m2_idx] = np.log(mix_weights) + log_dVdz  + log_time_dilation + int(self.include_spins)*log_p_s1s2 - np.log(pdraw) - np.log(m1*m2)  
-            tril_weights = self.array2d_to_tril(weights)
-        else:
-            nbins = int(len(self.mbins)*(len(self.mbins)-1)/2)*(len(self.zbins)-1)
-            tril_weights = np.zeros(nbins)
-            if (m1<self.mbins[0])|(m2<self.mbins[0])|(m1>self.mbins[-1])|(m2>self.mbins[-1])|(z<self.zbins[0])|(z>self.zbins[-1]):
-                    return tril_weights
-            weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])    
-            m1_idx = np.clip(np.searchsorted(self.mbins,m1,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            m2_idx = np.clip(np.searchsorted(self.mbins,m2,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-            z_idx = np.clip(np.searchsorted(self.zbins,z,side='right') - 1,a_min=0,a_max=len(self.zbins)-2)
-            log_dVdz = np.log(4*np.pi) + np.log(Planck15.differential_comoving_volume(z).to(u.Gpc**3/u.sr).value)
-            log_time_dilation = -np.log1p(z)
-            log_p_s1s2 = log_prob_spin(s1x,s1y,s1z,m1) + log_prob_spin(s2x,s2y,s2z,m2)
-            weights[m1_idx,m2_idx,z_idx] = np.log(mix_weights) + log_dVdz  + log_time_dilation + int(self.include_spins)*log_p_s1s2 - np.log(pdraw) - np.log(m1*m2)  
-            tril_weights = self.arraynd_to_tril(weights)
+        weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.zbins)-1])    
+        m1_idx = np.clip(np.searchsorted(self.mbins,m1,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
+        m2_idx = np.clip(np.searchsorted(self.mbins,m2,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
+        z_idx = np.clip(np.searchsorted(self.zbins,z,side='right') - 1,a_min=0,a_max=len(self.zbins)-2)
+        log_dVdz = np.log(4*np.pi) + np.log(Planck15.differential_comoving_volume(z).to(u.Gpc**3/u.sr).value)
+        log_time_dilation = -np.log1p(z)
+        log_p_s1s2 = log_prob_spin(s1x,s1y,s1z,m1) + log_prob_spin(s2x,s2y,s2z,m2)
+        weights[m1_idx,m2_idx,z_idx] = np.log(mix_weights) + log_dVdz  + log_time_dilation + int(self.include_spins)*log_p_s1s2 - np.log(pdraw) - np.log(m1*m2)  
+        tril_weights = self.arraynd_to_tril(weights)
 
         return tril_weights
     
@@ -1050,7 +880,7 @@ class Rates(Utils):
     that create pymc models to sample the posterior distribution
     of rate densities in each bin.
     """
-    def __init__(self, mbins,zbins = None):
+    def __init__(self, mbins,zbins):
         '''
         Parameters
         ----------
@@ -1059,15 +889,8 @@ class Rates(Utils):
                  1d array containing mass bin edges
         
         zbins :: numpy.ndarray
-                 1d array containing redshift bin edges.
-                 Default is None which will implement a m1-m2
-                 only inference which will assume the redshift 
-                 evolution of the merger rate is uniform in 
-                 Comoving volume and source frame time.
-                 This m1,m2 only inference was carried out
-                 in https://arxiv.org/abs/2111.03634
         '''
-        Utils.__init__(self,mbins,zbins = zbins)
+        Utils.__init__(self,mbins,zbins)
         
     def make_significant_model_3d_evolution_only(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=1.,mu_z_dim=None, vt_sigmas=None,vt_accuracy_check=None):
         '''
@@ -1388,193 +1211,3 @@ class Rates(Utils):
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
         
         return model
-                                           
-    def run_significant_model_2d(self,logM_bin_centers,weights,tril_vts,tril_deltaLogM, ls_mean, ls_sd, nsteps,ntune,njobs,target_accept=0.9):
-        ''' Function to sample a pymc Gaussian-process model for m1,m2 only
-        population inference. 
-
-        Parameters
-        ----------
-        logM_bin_centers                 ::    numpy.ndarray
-                                               2-D array of the mass bins in log space.
-
-        weights                          ::    numpy.ndarray
-                                               array containing the posterior weights of each event in each bin (shape is 
-                                               n_events,nbins).
-        
-        tril_vts                         ::    numpy.ndarray
-                                               array containing mean values of emperically estimated VTs. First output of
-                                               Vt_Utils.compute_vts 
-        
-        
-        tril_deltaLogM                   ::    numpy.ndarray
-                                               Array of lower-triangular deltaLogM values.
-                                               
-        ls_mean                          ::    float
-                                               mean of the GP's lengthscale.
-                                               
-        ls_sd                            ::    float
-                                               std of the GP's lengthscale.
-        
-        nsteps                           ::    int
-                                               Number of draws of the sampler.
-
-        ntune                            ::    int
-                                               Number of tuning steps for the sampler.
-
-        njobs                            ::    int
-                                               Number of jobs/cores to use to sample parallel chains.
-
-        target_accept                    ::    float
-                                               Target acceptance fraction for the chains.
-
-        Returns
-        -------
-        
-        trace  : arviz.InferenceData object.
-                 trace object containing results of sampling.
-        '''
-        with pm.Model() as gp_model:
-            mu = pm.Normal('mu',mu=0,sigma=10)
-            sigma = pm.HalfNormal('sigma',sigma=1)
-            length_scale = pm.Lognormal('length_scale',mu=ls_mean,sigma=ls_sd)
-            covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
-            gp = pm.gp.Latent(cov_func=covariance)
-            logn_corr = gp.prior('logn_corr',X=logM_bin_centers)
-            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
-            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
-            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(tt.exp(logn_tot+tt.log(tril_vts*tril_deltaLogM))))
-            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr))) - N_F_exp)
-            trace =pm.sample(draws=nsteps,tune=ntune,cores=njobs,discard_tuned_samples=True,
-                             target_accept=target_accept)
-        return trace
-
-    
-    def build_marg_model(self,logM_lower_tri_sorted,f_weights,b_weights,tril_vts,P_det,tril_deltaLogM,f_over_b):
-        ''' 
-        Function to build a pymc Gaussian-process model for m1,m2 only population 
-        inference from data including marginal triggers.
-
-        Parameters
-        ----------
-        logM_lower_tri_sorted : numpy.ndarray
-            2-D array of the mass bins in log space.
-
-        M_min : float
-            Lower limit of mass bins.
-
-        M_max : float
-            Upper limit of mass bins.
-
-        f_weights : numpy.ndarray
-            Foreground weights (divided by prior bin density for each event) 
-            obtained either from parameter estimation or machine learning.
-            Shape = (triggers,bins,bins)
-            
-        b_weights : numpy.ndarray
-            Background weights (divided by prior bin density for each event) 
-            convolved with a uniform prior.
-            Shape = (triggers,bins,bins)
-
-        tril_vts : numpy.ndarray
-            Array of lower-triangular volume-time sensitivity values.
-        
-        P_det : numpy.array
-            Array of detection probabilities scaled by VT for bin.
-
-        tril_deltaLogM : numpy.ndarray
-            Array of lower-triangular deltaLogM values.
-
-        f_over_b : numpy.ndarray
-            Array of bayes-factors of shape = (triggers,)
-
-        Returns
-        -------
-        gp_model : pm.Model() object
-            The pymc3 Gaussian process model object.
-        '''
-        with pm.Model() as gp_model:
-#            N_B_exp = pm.HalfNormal('N_B_exp',sd=6000)
-            mu = pm.Normal('mu',mu=0,sd=20,shape=len(logM_lower_tri_sorted))
-            sigma = pm.HalfNormal('sigma',sd=1)
-            length_scale = pm.Lognormal('length_scale',mu=-1.,sd=1)
-            covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
-            gp = pm.gp.Latent(cov_func=covariance)
-            logn_corr = gp.prior('logn_corr',X=logM_lower_tri_sorted)
-            logn_tot = pm.Deterministic('logn_tot',mu+logn_corr)
-            log_NF_exp = pm.Deterministic('log_NF_exp',logn_tot + tt.log(tril_vts*tril_deltaLogM))
-            n_corr = pm.Deterministic('n_corr',tt.exp(log_NF_exp))
-            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_corr))
-            F_term =pm.Deterministic('F_term',f_over_b*tt.dot(f_weights,n_corr)/3913)
-#            B_term = pm.Deterministic('B_term',b_weights*N_B_exp)
-            log_l = pm.Potential('log_l',tt.sum(tt.log1p(F_term)) - N_F_exp)
-        return gp_model
-
-    def sample(self,gp_model,nsteps,ntune,njobs,target_accept=0.9):
-        '''
-        Function that samples the pymc3 Gaussian process model.
-        
-        Parameters
-        ----------
-        gp_model : pm.Model() object
-            The pymc3 Gaussian process model object.
-
-        nsteps : int
-            Number of draws of the sampler.
-
-        ntune : int
-            Number of tuning steps for the sampler.
-
-        njobs : int
-            Number of jobs/cores to use to sample parallel chains.
-
-        target_accept : float
-            Target acceptance fraction for the chains.
-
-        integrator : str
-            Type of integration method to use for the pymc3 NUTS sampler.
-
-        Returns
-        -------
-        trace : pymc3 Trace object
-            Array contianing all the posterior samples from the sampling 
-            of the model.
-
-        '''
-        with gp_model:
-            trace = pm.sample(draws=nsteps,tune=ntune,cores=njobs,discard_tuned_samples=True,
-                              nuts_kwargs=dict(target_accept=target_accept))
-        return trace
-    
-    def sample_ppc(self,gp_model,nsteps,logM_lower_tri_sorted_pred,trace):
-        ''' Function that samples from the GP-model fitted for using the 
-        sample function (for m1,m2 only inference) and predicts rates at intermediate locations in 
-        the m1-m2 plane. (DEPRECATED)
-        
-        Parameters
-        ----------
-        gp_model : pm.Model() object
-            The pymc3 Gaussian process model object.
-        
-        nsteps : int
-            Number of draws of the sampler for the predictive distribution.
-        
-        logM_lower_tri_sorted_pred : numpy.ndarray
-            2-D array of the mass bins in log space at which the rate values
-            need to be predicted.
-        
-        trace : pymc3 Trace object
-            Array contianing all the posterior samples from the sampling of 
-            the model.
-            
-        Returns
-        -------
-        trace_pred : pymc3 Trace object
-            Array contianing all the posterior samples from the predictive 
-            sampling of the model.'''
-        with pm.Model(model=gp_model) as gp_model:
-            logn_corr_pred = gp.conditional('logn_corr_pred',Xnew=logM_lower_tri_sorted_pred)
-            trace_pred = pm.sample_ppc(trace=trace,samples=nsteps,vars=[logn_corr_pred])
-        return trace_pred
-    
-    

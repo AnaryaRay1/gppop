@@ -25,6 +25,9 @@ dependencies = [ # Optional
   "pesummary"
 ]
 
+[tool.poetry.scripts]
+"driver_script" = {source = "bin/driver_script"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

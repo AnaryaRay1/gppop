@@ -689,7 +689,8 @@ class Post_Proc_Utils(Utils):
         ----------
         
         n_corr                  ::   numpy.ndarray
-                                     1d array containing rate density in each bin
+                                     2d array containing rate density samples in each bin
+                                     of shape (nsamples,nbins)
                                      
         m1s                     ::   numpy.ndarray
                                      1d array containing values of primary mass m1 at which to evalute p(m1,m2,z)
@@ -711,9 +712,13 @@ class Post_Proc_Utils(Utils):
                     1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
         '''
         idx_array = np.arange(len(tril_edges))
-        bin_idx = np.array([idx_array[(tril_edges[:,0,0]<=np.log(m1))&(tril_edges[:,1,0]>=np.log(m1))&
-                   (tril_edges[:,0,1]<=np.log(m2))&(tril_edges[:,1,1]>=np.log(m2))&(tril_edges[:,0,2]<=z)&(log_bin_centers[:,1,2]>=z)] for m1,m2,z in zip(m1s,m2s,zs)])
-        p_m1m2z = (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))*n_corr[bin_idx]/m1s/m2s
+        
+        bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
+                   (tril_edges[:,0,1]<=m2)&(tril_edges[:,1,1]>=m2)&(tril_edges[:,0,2]<=z)&(tril_edges[:,1,2]>=z)] for m1,m2,z in zip(m1s,m2s,zs)]
+        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
+        n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
+        n_corr_at_idx[:,bin_idx] = n_corr[:,bin_idx]
+        p_m1m2z = n_corr_at_idx * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))/m1s/m2s
         return p_m1m2z
 
 class Vt_Utils(Utils):    
@@ -1210,4 +1215,4 @@ class Rates(Utils):
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
         
-        return model
+        return gp_model

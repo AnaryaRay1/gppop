@@ -1,0 +1,123 @@
+#mass bin edges
+mbins: [  5.,    6.5,   7.5,  12.5,  15.,   17.5,  30.,   40.,   50.,   60.,
+ 100. ]
+
+#redshift bin edges
+zbins: [0.01, 0.1,  0.25, 0.5,  0.75, 1.,   1.25, 1.5 ]
+
+#name of analysis meta-file to create
+meta_file: 'GWTC-3-BBH-UC.h5'
+
+#Number of PE samples per event
+nsamples: 4278
+
+#h5 file containing injected events for VT estimation
+injection_file: /home/anarya.ray/gppop-mdc/3d-clean/o1+o2+o3_bbhpop_real+semianalytic-LIGO-T2100377-v2.hdf5
+
+#keys to load from the injection file
+injection_keys:  
+    mass1_source: injections/mass1_source
+    mass2_source: injections/mass2_source
+    redshift: injections/redshift
+    spin1x: injections/spin1x
+    spin1y: injections/spin1y
+    spin1z: injections/spin1z
+    spin2x: injections/spin2x
+    spin2y: injections/spin2y
+    spin2z: injections/spin2z
+    sampling_pdf: injections/sampling_pdf
+    mixture_weight: injections/mixture_weight
+    gstlal_ifar: injections/ifar_gstlal
+    pycbc_hyper_ifar: injections/ifar_pycbc_hyperbank
+    pycbc_ifar: injections/ifar_pycbc_bbh
+    cwb_ifar: injections/ifar_cwb
+    mbta_ifar: injections/ifar_mbta
+
+
+#threshold to use for calling an injection detectable
+threshold: [1.0, 1.0, 1.0]
+
+#quantities to threshold on
+threshold_keys: ['gstlal_ifar','pycbc_hyper_ifar','pycbc_ifar']
+
+#o1o2 events
+event_dict: 
+      GW150914: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW150914_GWTC-1.hdf5']
+      GW151012: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW151012_GWTC-1.hdf5']
+      GW151226: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW151226_GWTC-1.hdf5']
+      GW170104: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170104_GWTC-1.hdf5']
+      GW170608: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170608_GWTC-1.hdf5']
+      GW170729: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170729_GWTC-1.hdf5']
+      GW170809: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170809_GWTC-1.hdf5']
+      GW170814: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170814_GWTC-1.hdf5']
+      GW170818: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170818_GWTC-1.hdf5']
+      GW170823: ['Overall_posterior', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-1/GW170823_GWTC-1.hdf5']
+
+#o3 and beyond events
+pe_summary_event_dict: 
+      S190408an: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190408an.h5']
+      S190412m: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190412m.h5']
+      S190413ac: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190413ac.h5']
+      S190421ar: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190421ar.h5']
+      S190503bf: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190503bf.h5']
+      S190512at: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190512at.h5']
+      S190513bm: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190513bm.h5']
+      S190517h: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190517h.h5']
+      S190519bj: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190519bj.h5']
+      S190521g: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190521g.h5']
+      S190521r: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190521r.h5']
+      S190602aq: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190602aq.h5']
+      S190620e: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190620e.h5']
+      S190630ag: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190630ag.h5']
+      S190701ah: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190701ah.h5']
+      S190706ai: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190706ai.h5']
+      S190707q: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190707q.h5']
+      S190708ap: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190708ap.h5']
+      S190720a: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190720a.h5']
+      S190727h: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190727h.h5']
+      S190728q: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190728q.h5']
+      S190803e: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190803e.h5']
+      S190828j: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190828j.h5']
+      S190828l: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190828l.h5']
+      S190910s: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190910s.h5']
+      S190915ak: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190915ak.h5']
+      S190924h: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190924h.h5']
+      S190925ad: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190925ad.h5']
+      S190929d: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190929d.h5']
+      S190930s: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190930s.h5']
+      S191105e: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191105e.h5']
+      S191109d: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191109d.h5']
+      S191129u: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191129u.h5']
+      S191204r: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191204r.h5']
+      S191215w: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191215w.h5']
+      S191216ap: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191216ap.h5']
+      S191222n: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191222n.h5']
+      S191230an: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191230an.h5']
+      S200112r: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200112r.h5']
+      S200128d: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200128d.h5']
+      S200129m: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200129m.h5']
+      S200202ac: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200202ac.h5']
+      S200208q: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200208q.h5']
+      S200209ab: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200209ab.h5']
+      S200219ac: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200219ac.h5']
+      S200224ca: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200224ca.h5']
+      S200225q: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200225q.h5']
+      S200302c: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200302c.h5']
+      S200311bg: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200311bg.h5']
+      S200316bj: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200316bj.h5']
+      S190413i: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190413i.h5']
+      S190527w: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190527w.h5']
+      S190719an: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190719an.h5']
+      S190725t: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190725t.h5']
+      S190731aa: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190731aa.h5']
+      S190805bq: ['PrecessingSpinIMRHM', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S190805bq.h5']
+      S191103a: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191103a.h5']
+      S191127p: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S191127p.h5']
+      S200216br: ['C01:Mixed', '/home/anarya.ray/gppop-prod/GWTC-3-test/data/GWTC-3/S200216br.h5']
+
+#analysis type: correlated or uncorrelated
+analysis_type: 'uncor'
+
+n_draw_pe: 4000
+n_draw_inj: 4000
+n_draw_pred: 4000

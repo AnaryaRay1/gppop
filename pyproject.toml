@@ -22,11 +22,12 @@ dependencies = [ # Optional
   "astropy",
   "scikit-learn == 1.2.0",
   "arviz == 0.14.0",
-  "pesummary"
+  "pesummary",
+  "popsummary@git+https://git.ligo.org/zoheyr-doctor/popsummary.git"
 ]
 
 [tool.poetry.scripts]
-"driver_script" = {source = "bin/driver_script"}
+"run_gppop" = {source = "bin/run_gppop"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

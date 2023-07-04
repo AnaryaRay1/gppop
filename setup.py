@@ -3,4 +3,4 @@
 from setuptools import setup
 
 if __name__ == "__main__":
-    setup(scripts=['bin/driver_script'])
+    setup(scripts=['bin/run_gppop'])

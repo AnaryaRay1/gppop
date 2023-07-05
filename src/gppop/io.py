@@ -426,7 +426,7 @@ class output_data_products(Post_Proc_Utils):
             self.n_corr_samples = np.array([self.reshape_uncorr(n_corr_m,n_corr_z) for n_corr_m, n_corr_z in zip(n_corr_m_samples,n_corr_z_samples)])
             self.mu_samples = np.array([trace['mu'].to_numpy()[:,:,i].reshape(self.N_samples) for i in range(self.nbins_m)]).T
             self.n_corr_z_tot = np.sum(n_corr_z_samples,axis=1)
-        self.lambda_m_samples = trace['length_scale'].to_numpy().reshape(self.N_samples)
+        self.lambda_m_samples = trace['length_scale_m'].to_numpy().reshape(self.N_samples)
         self.lambda_z_samples = trace['length_scale_z'].to_numpy().reshape(self.N_samples)
         self.sigma_samples = trace['sigma'].to_numpy().reshape(self.N_samples)
         self.n_corr_mean = np.mean(self.n_corr_samples,axis=0)[np.newaxis,:]

@@ -981,7 +981,7 @@ class Rates(Utils):
             mu_z = pm.Normal('mu_z',mu=0,sigma=1,shape=mu_z_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
             sigma_z = 1.
-            length_scale = pm.Lognormal('length_scale',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
             covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
             covariance_z = sigma_z**2*pm.gp.cov.ExpQuad(1,ls=length_scale_z)
@@ -1052,7 +1052,7 @@ class Rates(Utils):
             mu_z = pm.Normal('mu_z',mu=0,sigma=1,shape=mu_z_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
             sigma_z = 1.
-            length_scale = pm.Lognormal('length_scale',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
             covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
             covariance_z = sigma_z**2*pm.gp.cov.ExpQuad(1,ls=length_scale_z)

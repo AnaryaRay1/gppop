@@ -114,7 +114,7 @@ with gp_model:
 
 trace.to_netcdf('gppop_posterior.nc')
 
-io.write_results_to_metafile(config['meta_file'],'gppop_posterior_c.nc','gppop_prior_c.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True)
+io.write_results_to_metafile(config['meta_file'],'gppop_posterior.nc','gppop_prior.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True)
 
 os.remove('gppop_posterior.nc')
 os.remove('gppop_prior.nc')

@@ -420,11 +420,16 @@ class output_data_products(Post_Proc_Utils):
         if not uncor:
             n_corr = trace['n_corr'].to_numpy()
             self.n_corr_samples = np.array([n_corr[:,:,i].reshape((self.N_samples,)) for i in range(self.nbins)]).T
+            mu = trace['mu'].to_numpy()
+            self.mu_samples = np.array([mu[:,:,i].reshape((self.N_samples,)) for i in range(len(trace['mu_dim_0']))]).T
+
         else:
             n_corr_m_samples = np.array([trace['n_corr'].to_numpy()[:,:,i].reshape((self.N_samples,)) for i in range(self.nbins_m)]).T
             n_corr_z_samples = np.array([trace['n_corr_z'].to_numpy()[:,:,i].reshape((self.N_samples,)) for i in range(self.nbins_z)]).T
             self.n_corr_samples = np.array([self.reshape_uncorr(n_corr_m,n_corr_z) for n_corr_m, n_corr_z in zip(n_corr_m_samples,n_corr_z_samples)])
-            self.mu_samples = np.array([trace['mu'].to_numpy()[:,:,i].reshape(self.N_samples) for i in range(self.nbins_m)]).T
+            mu_samples_m = np.array([trace['mu'].to_numpy()[:,:,i].reshape(self.N_samples) for i in range(self.nbins_m)]).T
+            mu_samples_z = np.array([trace['mu_z'].to_numpy()[:,:,i].reshape(self.N_samples) for i in range(len(trace['mu_z_dim_0']))]).T
+            self.mu_samples = np.concatenate((mu_samples_m,mu_samples_z), axis = 1)
             self.n_corr_z_tot = np.sum(n_corr_z_samples,axis=1)
         self.lambda_m_samples = trace['length_scale_m'].to_numpy().reshape(self.N_samples)
         self.lambda_z_samples = trace['length_scale_z'].to_numpy().reshape(self.N_samples)

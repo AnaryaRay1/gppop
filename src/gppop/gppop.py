@@ -1145,14 +1145,19 @@ class Rates(Utils):
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
         assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nbins_m = int(len(self.mbins)*(len(self.mbins)-1)*0.5)
+        log_bin_centers_m = log_bin_centers[:nbins_m,:2]
+        log_bin_centers_z = log_bin_centers[0::nbins_m,2][:,None]
         with pm.Model() as gp_model:
             mu = pm.Normal('mu',mu=0,sigma=10,shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
             length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
-            covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=3,ls=[length_scale_m,length_scale_m,length_scale_z])
-            gp = pm.gp.Latent(cov_func=covariance)
-            logn_corr = gp.prior('logn_corr',X=log_bin_centers)
+            covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
+            covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m])
+            logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_z,log_bin_centers_m])
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
             n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
@@ -1204,13 +1209,17 @@ class Rates(Utils):
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
         assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        nbins_m = int(len(self.mbins)*(len(self.mbins)-1)*0.5)
+        log_bin_centers_m = log_bin_centers[:nbins_m,:2]
+        log_bin_centers_z = log_bin_centers[0::nbins_m,2][:,None]
         with pm.Model() as gp_model:
             mu = pm.Normal('mu',mu=0,sigma=10,shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
             length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
-            covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=3,ls=[length_scale_m,length_scale_m,length_scale_z])
-            gp = pm.gp.Latent(cov_func=covariance)
+            covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
+            covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m])
             logn_corr = gp.prior('logn_corr',X=log_bin_centers)
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))

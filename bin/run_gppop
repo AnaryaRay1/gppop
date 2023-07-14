@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse
-from gppop import gppop, io
+from gppop import core, io
 import numpy as np
 import pymc as pm
 import os
@@ -25,6 +25,7 @@ parser.add_argument('--jax_sampling', required = False, metavar = 'JAX_SAMPLING'
 parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=None)
 parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=None)
 parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
+parser.add_argument('--toeplitz_cov', required = False, metavar = 'TOEPLITZ_COV', help = 'Whether to fit gp in bin indices instead of bin centers',type=bool,default=False)
 args= parser.parse_args()
 
 with open(args.config, "r") as stream:
@@ -39,12 +40,21 @@ io.create_metafile(np.array(config['mbins']),np.array(config['zbins']),config['m
 
 mbins, zbins = np.array(config['mbins']),np.array(config['zbins'])
 
-utils = gppop.Utils(mbins,zbins)
-rates = gppop.Rates(mbins,zbins)
+utils = core.Utils(mbins,zbins)
+rates = core.Rates(mbins,zbins)
 
 log_bin_centers = utils.generate_log_bin_centers()
 deltaLogbin = utils.deltaLogbin()
 tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin)
+
+if args.toeplitz_cov:
+    assert config['analysis_type'] != 'uncor'
+    bin_indices = np.zeros_like(log_bin_centers)
+    for i,lbc in enumerate(log_bin_centers):
+        [m1c,m2c,zc] = lbc
+        bin_indices[i,:] = np.array([np.searchsorted(mbins,np.exp(m1c),side='right')-1, np.searchsorted(mbins,np.exp(m2c),side='right')-1,np.searchsorted(zbins,zc,side='right')-1])
+
+    log_bin_centers = bin_indices
 
 nbins = len(log_bin_centers)
 
@@ -85,8 +95,8 @@ with h5py.File(config['meta_file'],'r') as hf:
 
 
 if config['analysis_type'] != 'uncor':
-    gp_model = rates.make_significant_model_3d(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )
-    gp_model_prior = rates.make_gp_prior_model_3d(log_bin_centers = log_bin_centers, ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim)
+    gp_model = rates.make_significant_model_3d(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check,toeplitz_cov = args.toeplitz_cov )
+    gp_model_prior = rates.make_gp_prior_model_3d(log_bin_centers = log_bin_centers, ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,toeplitz_cov = args.toeplitz_cov)
 
 else:
     gp_model = rates.make_significant_model_3d_evolution_only(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_z_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )

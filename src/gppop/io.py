@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 __author__="Anarya Ray"
 
-from .gppop import Vt_Utils, Post_Proc_Utils, log_prob_spin
+from .core import Vt_Utils, Post_Proc_Utils, log_prob_spin
 import numpy as np
 import arviz as az
 from astropy.cosmology import Planck15,z_at_value

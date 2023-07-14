@@ -12,7 +12,8 @@ from astropy.cosmology import Planck15,z_at_value
 from astropy import units as u
 from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
-import sys
+from .toeplitz_gp import LatentKron as tgp_LatentKron
+import warnings
 
 ############################
 #  Support Functions       #
@@ -1067,7 +1068,7 @@ class Rates(Utils):
             
         return gp_model
     
-    def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
+    def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False,toeplitz_cov = False):
         '''
         Function that creates a pymc model that will sample the posterior in 
         Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
@@ -1108,17 +1109,26 @@ class Rates(Utils):
         
         mu_z_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
-                                               or None. Default is None which corresponds to mu_dim = number of
-                                               bins.
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
         
         vt_sigmas                        ::    numpy.ndarray
-                                               1d array containing std values of emperically estimated VTs. Second output of
-                                               Vt_Utils.compute_vts. Default is None (Should not be None if vt_accuracy_check=True)
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
         
         vt_accuracy_check                ::    bool
-                                               Whether or not to implement marginalization of Monte Carlo uncertainties in VT 
-                                               estimation. If True, samples from the posterior on Eq. B11. If False (default),
-                                               samples from the posterior in Eq. A6.
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
+        toeplitz_cov                     ::    bool
+                                               Whether to reparametrize dependent variable into bin
+                                               indices from bin centers. Default is False. If true,
+                                               covariance matrix becomes a kronecker product of
+                                               toeplitz matrices leading to quadratic time complexity
+                                               of for Cholesky factorization
                                                
         
         Returns
@@ -1127,6 +1137,9 @@ class Rates(Utils):
         gp_model  : pymc.Model object.
                     model object for sampling the rate densities posterior.
         '''
+        if toeplitz_cov:
+            warnings.warn("Warning.. Schur algorithm used for factorizing Toeplitz matrix is not stable for high rank matrices. If inference fails, re-launch with toeplitz_cov=False")
+
         tril_vts = tril_vts*tril_deltaLogbins
         arg = tril_vts>0.
         if(len(np.where(~arg)[0])>0):
@@ -1156,7 +1169,7 @@ class Rates(Utils):
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
             covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
             covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
-            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m])
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m]) if not toeplitz_cov else tgp_LatentKron(cov_funcs=[covariance_z, covariance_m])
             logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_z,log_bin_centers_m])
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
@@ -1168,7 +1181,7 @@ class Rates(Utils):
             
         return gp_model
     
-    def make_gp_prior_model_3d(self,log_bin_centers, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None):
+    def make_gp_prior_model_3d(self,log_bin_centers, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None,toeplitz_cov=False):
         '''
         Function that creates a pymc model for sampling rate-densities
         from the GP prior in Eqs. 5.
@@ -1196,8 +1209,15 @@ class Rates(Utils):
         
         mu_z_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
-                                               or None. Default is None which corresponds to mu_dim = number of
-                                               bins.
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
+        toeplitz_cov                     ::    bool
+                                               Whether to reparametrize dependent variable into bin
+                                               indices from bin centers. Default is False. If true,
+                                               covariance matrix becomes a kronecker product of
+                                               toeplitz matrices leading to quadratic time complexity
+                                               for Cholesky factorization
         
         Returns
         -------
@@ -1206,6 +1226,9 @@ class Rates(Utils):
                     model object for sampling the rate densities prior.
         
         '''
+        if toeplitz_cov:
+            warnings.warn("Warning.. Schur algorithm used for factorizing Toeplitz matrix is not stable for high rank matrices. If inference fails, re-launch with toeplitz_cov=False")
+            
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
         assert mu_dim==1 or mu_dim==len(log_bin_centers)
@@ -1219,9 +1242,10 @@ class Rates(Utils):
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
             covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
             covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
-            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m])
-            logn_corr = gp.prior('logn_corr',X=log_bin_centers)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m]) if not toeplitz_cov else tgp_LatentKron(cov_funcs=[covariance_z, covariance_m])
+            logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_z,log_bin_centers_m])
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
         
         return gp_model
+    

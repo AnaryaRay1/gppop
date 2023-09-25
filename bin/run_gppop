@@ -47,56 +47,91 @@ log_bin_centers = utils.generate_log_bin_centers()
 deltaLogbin = utils.deltaLogbin()
 tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin)
 
-if args.toeplitz_cov:
-    assert config['analysis_type'] != 'uncor'
-    bin_indices = np.zeros_like(log_bin_centers)
-    for i,lbc in enumerate(log_bin_centers):
-        [m1c,m2c,zc] = lbc
-        bin_indices[i,:] = np.array([np.searchsorted(mbins,np.exp(m1c),side='right')-1, np.searchsorted(mbins,np.exp(m2c),side='right')-1,np.searchsorted(zbins,zc,side='right')-1])
-
-    log_bin_centers = bin_indices
-
-nbins = len(log_bin_centers)
-
-nz= len(zbins)-1
-nm = int(len(log_bin_centers)/nz)
-
-dist_array = np.zeros(int(nm*(nm+1)/2))
-
-z_bin_centers = log_bin_centers[0::nm,2]
-logm_bin_centers = log_bin_centers[:nm,:2]
-k=0
-for i in range(len(logm_bin_centers)):
-    for j in range(i+1):
-        dist_array[k] = np.linalg.norm(logm_bin_centers[i]-logm_bin_centers[j])
-        k+=1
-
-scale_min = np.log(np.min(dist_array[dist_array!=0.]))
-scale_max = np.log(np.max(dist_array))
-scale_mean_m = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
-scale_sd_m = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
-
-dist_array = np.zeros(int(nz*(nz+1)/2))
-k=0
-for i in range(len(z_bin_centers)):
-    for j in range(i+1):
-        dist_array[k] = np.linalg.norm(z_bin_centers[i]-z_bin_centers[j])
-        k+=1
-
-scale_min = np.log(np.min(dist_array[dist_array!=0.]))
-scale_max = np.log(np.max(dist_array))
-scale_mean_z = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
-scale_sd_z = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
-
 with h5py.File(config['meta_file'],'r') as hf:
     gppop_data = hf['gppop_metadata']
     weights, total_vts, total_vt_sigmas = gppop_data['posterior_weights'][()], gppop_data['vt_means'][()], gppop_data['vt_sigmas'][()]
 
+if args.toeplitz_cov:
+    assert config['analysis_type'] != 'uncor'
+    bin_indices = []
+    nbins_m = len(mbins)-1
+    nbins_z = len(zbins)-1
+    for k in range(nbins_z):
+        for i in range(nbins_m):
+            for j in range(i+1):
+                bin_indices.append([i,j,k])
+    nm = int(nbins_m*(nbins_m+1)*0.5)
+    log_bin_centers = np.array(bin_indices)
+    z_bin_centers = log_bin_centers[0::nm,2]
+    logm_bin_centers = log_bin_centers[:nm,:2]
+    k=0
+    dist_array = np.zeros(int(nm*(nm+1)/2))
+    for i in range(len(logm_bin_centers)):
+        for j in range(i+1):
+            dist_array[k] = np.linalg.norm(logm_bin_centers[i]-logm_bin_centers[j])
+            k+=1
+
+    scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+    scale_max = np.log(np.max(dist_array))
+    scale_mean_m = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+    scale_sd_m = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+
+    dist_array = np.zeros(int(nbins_z*(nbins_z+1)/2))
+    k=0
+    for i in range(nbins_z):
+        for j in range(i+1):
+            dist_array[k] = np.linalg.norm(z_bin_centers[i]-z_bin_centers[j])
+            k+=1
+
+    scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+    scale_max = np.log(np.max(dist_array))
+    scale_mean_z = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+    scale_sd_z = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+    
+    corr_posterior_model = rates.make_significant_model_3d_toeplitz
+    corr_prior_model = rates.make_gp_prior_model_3d_toeplitz
+else:
+    nbins = len(log_bin_centers)
+
+    nz= len(zbins)-1
+    nm = int(len(log_bin_centers)/nz)
+
+    dist_array = np.zeros(int(nm*(nm+1)/2))
+
+    z_bin_centers = log_bin_centers[0::nm,2]
+    logm_bin_centers = log_bin_centers[:nm,:2]
+    k=0
+    for i in range(len(logm_bin_centers)):
+        for j in range(i+1):
+            dist_array[k] = np.linalg.norm(logm_bin_centers[i]-logm_bin_centers[j])
+            k+=1
+
+    scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+    scale_max = np.log(np.max(dist_array))
+    scale_mean_m = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+    scale_sd_m = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+
+    dist_array = np.zeros(int(nz*(nz+1)/2))
+    k=0
+    for i in range(len(z_bin_centers)):
+        for j in range(i+1):
+            dist_array[k] = np.linalg.norm(z_bin_centers[i]-z_bin_centers[j])
+            k+=1
+
+    scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+    scale_max = np.log(np.max(dist_array))
+    scale_mean_z = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+    scale_sd_z = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+    corr_posterior_model = rates.make_significant_model_3d
+    corr_prior_model = rates.make_gp_prior_model_3d
+
+
+
 
 
 if config['analysis_type'] != 'uncor':
-    gp_model = rates.make_significant_model_3d(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check,toeplitz_cov = args.toeplitz_cov )
-    gp_model_prior = rates.make_gp_prior_model_3d(log_bin_centers = log_bin_centers, ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,toeplitz_cov = args.toeplitz_cov)
+    gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check)
+    gp_model_prior = corr_prior_model(log_bin_centers = log_bin_centers, ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim)
 
 else:
     gp_model = rates.make_significant_model_3d_evolution_only(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_z_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )
@@ -124,7 +159,7 @@ with gp_model:
 
 trace.to_netcdf('gppop_posterior.nc')
 
-io.write_results_to_metafile(config['meta_file'],'gppop_posterior.nc','gppop_prior.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True)
+io.write_results_to_metafile(config['meta_file'],'gppop_posterior.nc','gppop_prior.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True,toeplitz_cov=args.toeplitz_cov)
 
 os.remove('gppop_posterior.nc')
 os.remove('gppop_prior.nc')

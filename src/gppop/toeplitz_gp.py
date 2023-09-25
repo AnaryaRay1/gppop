@@ -4,7 +4,7 @@ __author__="Anarya Ray"
 import pymc as pm
 from pymc.gp.cov import Constant
 from pymc.gp.mean import Zero
-from pymc.gp.util import JITTER_DEFAULT, stabilize
+from pymc.gp.util import JITTER_DEFAULT, stabilize,cholesky
 from pymc.math import cartesian, kron_dot
 import aesara.tensor as at
 from aesara.tensor.slinalg import Cholesky
@@ -62,9 +62,8 @@ class Latent(pm.gp.Latent):
 
 class LatentKron(pm.gp.LatentKron):
     def __init__(self, *, mean_func=Zero(), cov_funcs=(Constant(0.0))):
-        
         super().__init__(mean_func=mean_func, cov_funcs=cov_funcs)
-    
+        
     def _build_prior(self, name, Xs, jitter, **kwargs):
         self.N = int(np.prod([len(X) for X in Xs]))
         mu = self.mean_func(cartesian(*Xs))

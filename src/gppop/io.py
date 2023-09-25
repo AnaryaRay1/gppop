@@ -278,7 +278,7 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
                 gpmd.create_dataset(key,data = val)
 
     
-def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior, n_draw_pe, n_draw_inj, n_draw_pred, overwrite = False, include_spins = True):
+def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior, n_draw_pe, n_draw_inj, n_draw_pred, overwrite = False, include_spins = True, toeplitz_cov = False):
     """
     Function for generating output data products and writing them to the 
     same meta-file created by create_metafile.
@@ -326,12 +326,12 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
                 mbins = hf['gppop_metadata']['mbins'][()]
                 zbins = hf['gppop_metadata']['zbins'][()]
     
-    gp_outputs = {"posterior":output_data_products(mbins,zbins,trace_file_posterior,uncor = (analysis_type == 'uncor')), "prior" : output_data_products(mbins,zbins,trace_file_prior,uncor = (analysis_type == 'uncor'))}
+    gp_outputs = {"posterior":output_data_products(mbins,zbins,trace_file_posterior,uncor = (analysis_type == 'uncor'),toeplitz_cov = toeplitz_cov), "prior" : output_data_products(mbins,zbins,trace_file_prior,uncor = (analysis_type == 'uncor'), toeplitz_cov = toeplitz_cov)}
     
+    hyperparameter_names = np.array([f'$\lambda_m$',f'$\lambda_z$',f'$\sigma$']) #if not toeplitz_cov else np.array([f'$\lambda_m1$',f'$\lambda_m2$',f'$\lambda_z$',f'$\sigma$'])
     if len(gp_outputs['posterior'].mu_samples.shape)==1:
-        hyperparameter_names = np.array([f'$\lambda_m$',f'$\lambda_z$',f'$\sigma$',f'$\mu$'])
+        hyperparameter_names = np.append(hyperparameter_names,[f'$\mu$'])
     else:
-        hyperparameter_names = np.array([f'$\lambda_m$',f'$\lambda_z$',f'$\sigma$'])
         hyperparameter_names = np.append(hyperparameter_names,np.array([f'$\mu_{i}$' for i in range(gp_outputs['posterior'].nbins_m)]))
     hyperparameter_names = np.append(hyperparameter_names,np.array([f'$n_{i}$' for i in range(gp_outputs['posterior'].nbins)])).tolist()
     popsummary.set_metadata('hyperparameters',hyperparameter_names,overwrite=overwrite)
@@ -339,11 +339,7 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
     
     for group, gp_output in gp_outputs.items():
             
-            if len(gp_output.mu_samples.shape)==1:
-                hyper_samples = np.array([gp_output.lambda_m_samples, gp_output.lambda_z_samples, gp_output.sigma_samples, gp_output.mu_samples]).T
-            else:
-                hyper_samples = np.concatenate((np.array([gp_output.lambda_m_samples, gp_output.lambda_z_samples, gp_output.sigma_samples]).T, gp_output.mu_samples), axis = 1)
-            hyper_samples = np.concatenate((hyper_samples,gp_output.n_corr_samples),axis = 1)
+            hyper_samples = np.concatenate((gp_output.lambda_m_samples, gp_output.lambda_z_samples, gp_output.sigma_samples, gp_output.mu_samples,gp_output.n_corr_samples),axis = 1)
             popsummary.set_hyperparameter_samples(hyper_samples,overwrite = overwrite, group = group)
                 
             reweighted_pe_samples = np.zeros([pe_samples.shape[0], n_draw_pe, gp_output.N_samples, pe_samples.shape[-1]])
@@ -352,17 +348,19 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
                 reweighted_pe_samples[i,:,:,:] = gp_output.reweight_pe_samples(pe_samples[i], n_corr_sample=gp_output.n_corr_samples, m1m2z_prior=None if all(pe_prior[i]== 1.0) else pe_prior[i], size=n_draw_pe)
             
             popsummary.set_reweighted_event_samples(reweighted_pe_samples,overwrite = overwrite, group = group)
+            reweight_pe_samples = [ ]
             
             reweighted_injections = np.zeros([n_draw_inj,1, gp_output.N_samples, 9])
             print(f'reweighting injections using hyper-{group}')
             reweighted_injections[:,0,:,:] = gp_output.reweight_injections(injections, list(thresh), key = list(keys), include_spins = include_spins, n_corr_sample= gp_output.n_corr_samples, size=n_draw_inj)
             popsummary.set_reweighted_injections(reweighted_injections, overwrite=overwrite, group=group)
+            reweight_injections = [ ]
             
             print(f'generating fair population draws from the hyper-{group}')
             fair_draws = np.zeros([n_draw_pred, gp_output.N_samples, 3])
             fair_draws = gp_output.posterior_predictive_samples(n_corr_sample=gp_output.n_corr_samples, size=n_draw_pred)
             popsummary.set_fair_population_draws(fair_draws, overwrite=overwrite, group=group)
-            
+            fair_draws = [ ]
             
             if analysis_type == 'uncor':
                 print(f'computing marginal rate densities on grid for hyper-{group}')
@@ -386,7 +384,7 @@ class output_data_products(Post_Proc_Utils):
     according to RnP recommended guidelines
     for a population analysis.
     """
-    def __init__(self,mbins,zbins,trace_file,uncor=False):
+    def __init__(self,mbins,zbins,trace_file,uncor=False,toeplitz_cov = False):
         '''
         Initialize output_data_products class.
         
@@ -411,17 +409,22 @@ class output_data_products(Post_Proc_Utils):
         
         self.nbins_m =int((len(mbins)*(len(mbins)-1)*0.5))
         self.nbins_z = int(len(zbins)-1) 
-        self.nbins = int((len(mbins)*(len(mbins)-1)*0.5*(len(zbins)-1 if zbins is not None else 1)))
+        self.nbins = int(nbins_m*nbins_z)
         
         trace = az.from_netcdf(trace_file)['posterior']
         self.N_samples = int(len(trace['draw'])*len(trace['chain']))
         self.uncor = uncor
         
         if not uncor:
+            
             n_corr = trace['n_corr'].to_numpy()
-            self.n_corr_samples = np.array([n_corr[:,:,i].reshape((self.N_samples,)) for i in range(self.nbins)]).T
+            n_corr_samples = np.array([n_corr[:,:,i].reshape((self.N_samples,)) for i in range(len(trace['n_corr_dim_0']))]).T
             mu = trace['mu'].to_numpy()
-            self.mu_samples = np.array([mu[:,:,i].reshape((self.N_samples,)) for i in range(len(trace['mu_dim_0']))]).T
+            mu_samples = np.array([mu[:,:,i].reshape((self.N_samples,)) for i in range(len(trace['mu_dim_0']))]).T
+            
+            self.n_corr_samples = n_corr_samples 
+            self.mu_samples = mu_samples 
+            
 
         else:
             n_corr_m_samples = np.array([trace['n_corr'].to_numpy()[:,:,i].reshape((self.N_samples,)) for i in range(self.nbins_m)]).T
@@ -431,9 +434,9 @@ class output_data_products(Post_Proc_Utils):
             mu_samples_z = np.array([trace['mu_z'].to_numpy()[:,:,i].reshape(self.N_samples) for i in range(len(trace['mu_z_dim_0']))]).T
             self.mu_samples = np.concatenate((mu_samples_m,mu_samples_z), axis = 1)
             self.n_corr_z_tot = np.sum(n_corr_z_samples,axis=1)
-        self.lambda_m_samples = trace['length_scale_m'].to_numpy().reshape(self.N_samples)
-        self.lambda_z_samples = trace['length_scale_z'].to_numpy().reshape(self.N_samples)
-        self.sigma_samples = trace['sigma'].to_numpy().reshape(self.N_samples)
+        self.lambda_m_samples = trace['length_scale_m'].to_numpy().reshape(self.N_samples)[:,np.newaxis] 
+        self.lambda_z_samples = trace['length_scale_z'].to_numpy().reshape(self.N_samples)[:,np.newaxis]
+        self.sigma_samples = trace['sigma'].to_numpy().reshape(self.N_samples)[:,np.newaxis]
         self.n_corr_mean = np.mean(self.n_corr_samples,axis=0)[np.newaxis,:]
     
     def reweight_pe_samples(self,m1m2z_samples,n_corr_sample=None, m1m2z_prior=None,size=None):

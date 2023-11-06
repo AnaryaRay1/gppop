@@ -351,38 +351,7 @@ class Utils():
                     delta_logz_array[i,j,k] = dz
 
         return self.arraynd_to_tril(delta_logz_array)
-        
-    def reflect_tril(self, nbins_m, tril_array, nbins_z):
-        nd_array = self.construct_1dtond_matrix(nbins_m,tril_array,nbins_z)
-        shp = list(tril_array.shape)
-        shp[0] = nbins_m*nbins_m*nbins_z 
-        arr = np.zeros(shp) 
-        n=0
-        for k in range(nbins_z):
-            for i in range(nbins_m):
-                for j in range(nbins_m):
-                    if(j<i):
-                        arr[n] = nd_array[i,j,k]
-                    elif j>i:
-                        arr[n] = nd_array[j,i,k]
-                    else:
-                        arr[n] = nd_array[i,j,k]*2.0
-                    n+=1
-        return arr
-
-    def reverse_reflected_tril(self, nbins_m, tril_array, nbins_z):
-        nd_array = self.construct_1dtond_matrix(nbins_m,tril_array,nbins_z,tril=False)
-        shp = list(tril_array.shape)
-        shp[0] = int(nbins_m*(nbins_m+1)*0.5*nbins_z)
-        arr = np.zeros(shp)
-        n=0
-        for k in range(nbins_z):
-            for i in range(nbins_m):
-                for j in range(i+1):
-                    arr[n] = 0.5*(nd_array[i,j,k]+nd_array[j,i,k])
-                    n+=1
-        return arr
-        
+    
 class Post_Proc_Utils(Utils):
     """
     Postprocessing Utilities for GP 

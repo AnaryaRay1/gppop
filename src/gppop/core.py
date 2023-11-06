@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-__author__="Anarya Ray"
+__author__="Anarya Ray <anarya.ray@ligo.org>; Siddharth Mohite <siddharth.mohite@ligo.org>"
 
 
 import numpy as np
@@ -12,7 +12,7 @@ from astropy.cosmology import Planck15,z_at_value
 from astropy import units as u
 from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
-import sys
+import warnings
 
 ############################
 #  Support Functions       #
@@ -241,7 +241,7 @@ class Utils():
         return log_lower_tri_sorted
             
                 
-    def construct_1dtond_matrix(self,nbins_m,values,nbins_z):
+    def construct_1dtond_matrix(self,nbins_m,values,nbins_z, tril=True):
         '''
         Inverse of arraynd_to_tril() Returns a n-D
         represenation matrix of a given set of the lower
@@ -264,13 +264,14 @@ class Utils():
             n-D symmetric array using values.
         '''
         k=0
-
-        matrix = np.zeros([nbins_m,nbins_m,nbins_z])
+        if len(values.shape)>1:
+            matrix = np.zeros((nbins_m,nbins_m,nbins_z)+values.shape[1:])
+        else:
+            matrix = np.zeros((nbins_m,nbins_m,nbins_z))
         for l in range(nbins_z):
             for i in range(nbins_m):
-                for j in range(i+1):
+                for j in range(i+1 if tril else nbins_m ):
                     matrix[i,j,l] = values[k]
-                    #matrix[j,i] = values[k]
                     k+=1
             
         return matrix
@@ -351,7 +352,37 @@ class Utils():
 
         return self.arraynd_to_tril(delta_logz_array)
         
+    def reflect_tril(self, nbins_m, tril_array, nbins_z):
+        nd_array = self.construct_1dtond_matrix(nbins_m,tril_array,nbins_z)
+        shp = list(tril_array.shape)
+        shp[0] = nbins_m*nbins_m*nbins_z 
+        arr = np.zeros(shp) 
+        n=0
+        for k in range(nbins_z):
+            for i in range(nbins_m):
+                for j in range(nbins_m):
+                    if(j<i):
+                        arr[n] = nd_array[i,j,k]
+                    elif j>i:
+                        arr[n] = nd_array[j,i,k]
+                    else:
+                        arr[n] = nd_array[i,j,k]*2.0
+                    n+=1
+        return arr
 
+    def reverse_reflected_tril(self, nbins_m, tril_array, nbins_z):
+        nd_array = self.construct_1dtond_matrix(nbins_m,tril_array,nbins_z,tril=False)
+        shp = list(tril_array.shape)
+        shp[0] = int(nbins_m*(nbins_m+1)*0.5*nbins_z)
+        arr = np.zeros(shp)
+        n=0
+        for k in range(nbins_z):
+            for i in range(nbins_m):
+                for j in range(i+1):
+                    arr[n] = 0.5*(nd_array[i,j,k]+nd_array[j,i,k])
+                    n+=1
+        return arr
+        
 class Post_Proc_Utils(Utils):
     """
     Postprocessing Utilities for GP 
@@ -1108,17 +1139,20 @@ class Rates(Utils):
         
         mu_z_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
-                                               or None. Default is None which corresponds to mu_dim = number of
-                                               bins.
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
         
         vt_sigmas                        ::    numpy.ndarray
-                                               1d array containing std values of emperically estimated VTs. Second output of
-                                               Vt_Utils.compute_vts. Default is None (Should not be None if vt_accuracy_check=True)
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
         
         vt_accuracy_check                ::    bool
-                                               Whether or not to implement marginalization of Monte Carlo uncertainties in VT 
-                                               estimation. If True, samples from the posterior on Eq. B11. If False (default),
-                                               samples from the posterior in Eq. A6.
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
                                                
         
         Returns
@@ -1156,7 +1190,7 @@ class Rates(Utils):
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
             covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
             covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
-            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m])
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m]) 
             logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_z,log_bin_centers_m])
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
@@ -1196,8 +1230,9 @@ class Rates(Utils):
         
         mu_z_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
-                                               or None. Default is None which corresponds to mu_dim = number of
-                                               bins.
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
         
         Returns
         -------
@@ -1219,9 +1254,10 @@ class Rates(Utils):
             length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
             covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
             covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
-            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m])
-            logn_corr = gp.prior('logn_corr',X=log_bin_centers)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m]) 
+            logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_z,log_bin_centers_m])
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
         
         return gp_model
+    

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse
-from gppop import gppop, io
+from gppop import core, io
 import numpy as np
 import pymc as pm
 import os
@@ -39,12 +39,17 @@ io.create_metafile(np.array(config['mbins']),np.array(config['zbins']),config['m
 
 mbins, zbins = np.array(config['mbins']),np.array(config['zbins'])
 
-utils = gppop.Utils(mbins,zbins)
-rates = gppop.Rates(mbins,zbins)
+utils = core.Utils(mbins,zbins)
+rates = core.Rates(mbins,zbins)
 
 log_bin_centers = utils.generate_log_bin_centers()
 deltaLogbin = utils.deltaLogbin()
 tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin)
+
+with h5py.File(config['meta_file'],'r') as hf:
+    gppop_data = hf['gppop_metadata']
+    weights, total_vts, total_vt_sigmas = gppop_data['posterior_weights'][()], gppop_data['vt_means'][()], gppop_data['vt_sigmas'][()]
+
 
 nbins = len(log_bin_centers)
 
@@ -77,16 +82,16 @@ scale_min = np.log(np.min(dist_array[dist_array!=0.]))
 scale_max = np.log(np.max(dist_array))
 scale_mean_z = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
 scale_sd_z = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
+corr_posterior_model = rates.make_significant_model_3d
+corr_prior_model = rates.make_gp_prior_model_3d
 
-with h5py.File(config['meta_file'],'r') as hf:
-    gppop_data = hf['gppop_metadata']
-    weights, total_vts, total_vt_sigmas = gppop_data['posterior_weights'][()], gppop_data['vt_means'][()], gppop_data['vt_sigmas'][()]
+
 
 
 
 if config['analysis_type'] != 'uncor':
-    gp_model = rates.make_significant_model_3d(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )
-    gp_model_prior = rates.make_gp_prior_model_3d(log_bin_centers = log_bin_centers, ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim)
+    gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check)
+    gp_model_prior = corr_prior_model(log_bin_centers = log_bin_centers, ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim)
 
 else:
     gp_model = rates.make_significant_model_3d_evolution_only(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_z_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check )

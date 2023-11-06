@@ -1,3 +1,5 @@
 .ipynb_checkpoints
 __pycache__
 gppop.egg-info
+build
+gppop/src/gppop/lib

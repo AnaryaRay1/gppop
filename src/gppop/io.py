@@ -596,9 +596,7 @@ class output_data_products(Post_Proc_Utils):
         n_corr_samples_m = self.n_corr_samples.copy()
         if self.uncor:
             n_corr_samples_m[:,self.nbins_m:] = 0
-            n_corr_samples_m/= self.n_corr_z_tot[:,np.newaxis]
-                
-        
+
         R_z,R_pm1,R_pm2= [ ] , [ ], [ ]
         for i,(n_corr_sample,n_corr_sample_m) in enumerate(zip(self.n_corr_samples,n_corr_samples_m)):
             Z,Rz = self.get_Rz(n_corr_sample,dm1,dm2,self.mbins,self.mbins,

@@ -680,6 +680,51 @@ class Post_Proc_Utils(Utils):
             Z = np.append(Z, z_array)
         return Z,Rz
     
+    def get_Rq(self,n_corr,qs,tril_edges,mmin=None,mmax=None):
+        '''
+        Function for computing the marginalized dR/dq
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     1d array containing a rate density sample in each bin
+                                     of shape (nbins,)
+                                     
+        Qs                      ::   numpy.ndarray
+                                     1d array containing values of q at which to evalute dR/dq
+                                     
+        tril_edges              ::   numpy.ndarray
+                                     array containing values of m1 bin edges in lower triangular format
+                                     (output of Utils.tril_edges() function)
+        
+        mmin                    ::    float
+                                      minimum value of m1 used when marginalizing over m1. Default is None in which case
+                                      the lowest m1 bin edge is used
+        
+        mmax                    ::    float
+                                      maximum value of m1 used when marginalizing over m1. Default is None in which case
+                                      the highest m1 bin edge is used
+        
+        Returns
+        -------
+        
+        dR/dq   : numpy.ndarray
+                    1d array containing dR/dq evaluated at the supplied values of Qs
+        '''
+        mmin = min(self.mbins) if mmin is None else mmin
+        mmax = max(self.mbins) if mmax is None else mmax
+        ones = np.ones_like(qs)[:,np.newaxis]
+        m1_max = np.minimum(tril_edges[np.newaxis,:,1,0]*ones,tril_edges[np.newaxis,:,1,1]/(qs[:,np.newaxis]))
+        m1_min = np.maximum(tril_edges[np.newaxis,:,0,0]*ones,tril_edges[np.newaxis,:,0,1]/(qs[:,np.newaxis]))
+        imask1 = m1_min<m1_max
+        mask2 = np.where((tril_edges[np.newaxis,:,0,0]*ones>mmin)*(tril_edges[np.newaxis,:,1,0]*ones<mmax))
+        n_corr_at_idx = np.repeat(n_corr[np.newaxis,:],len(qs),axis=0)
+        n_corr_at_idx[imask1] *= np.log(m1_max[imask1])-np.log(m1_min[imask1])
+        n_corr_at_idx[~imask1] = 0
+        n_corr_at_idx[mask2] = 0
+        return np.sum(n_corr_at_idx/(qs[:,np.newaxis]),axis=1)
+
     def get_pm1m2z(self,n_corr,m1s,m2s,zs,tril_edges):
         '''
         Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
@@ -720,7 +765,7 @@ class Post_Proc_Utils(Utils):
         n_corr_at_idx[:,bin_idx] = n_corr[:,bin_idx]
         p_m1m2z = n_corr_at_idx * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))/m1s/m2s
         return p_m1m2z
-
+    
 class Vt_Utils(Utils):    
     """
     Utilities for computing selection effects in GP 

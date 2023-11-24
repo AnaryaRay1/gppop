@@ -22,7 +22,7 @@ parser.add_argument('--nsteps', type = int, required = True, metavar = 'NSTEPS',
 parser.add_argument('--target_accept', type = float, required = True, metavar = 'TARGET_ACCEPT', help = 'Target acceptance fraction for the sampler.')
 parser.add_argument('--njobs', type = int, required = True, metavar = 'TARGET_ACCEPT', help = 'number of chains to run sampling for')
 parser.add_argument('--jax_sampling', required = False, metavar = 'JAX_SAMPLING', help = 'whether to use jax sampling or not',type=bool,default=False)
-parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=None)
+parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=10)
 parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=None)
 parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
 args= parser.parse_args()

@@ -31,7 +31,6 @@ from jaxinterp2d import interp2d, CartesianGrid
 import tqdm
 from jax import jit
 
-import jax
 
 seed = np.random.randint(1000)
 key = jax.random.PRNGKey(seed)
@@ -92,6 +91,20 @@ def bin_edges(mbins):
                 continue
             edge_array.append([[m1[i],m2[j]],[m1[i+1],m2[j+1]]])
     return jnp.array(edge_array)
+
+
+def generate_logM_bin_centers(mbins):
+        
+        log_m1 = np.log(mbins)
+        log_m2 = np.log(mbins)
+        nbin = len(log_m1) - 1
+        logm1_bin_centres = jnp.asarray([0.5*(log_m1[i+1]+log_m1[i])for i in range(nbin)])
+        logm2_bin_centres = jnp.asarray([0.5*(log_m2[i+1]+log_m2[i])for i in range(nbin)])
+        l1,l2 = jnp.meshgrid(logm1_bin_centres,logm2_bin_centres)
+        logM = jnp.concatenate((l1.reshape([nbin*nbin,1]),l2.reshape([nbin*nbin,1])),axis=1)
+        logM_lower_tri = jnp.asarray([a for a in logM if a[1]<=a[0]])
+        logM_lower_tri_sorted = jnp.asarray([logM_lower_tri[i] for i in jnp.argsort(logM_lower_tri[:,0],kind='mergesort')])
+        return logM_lower_tri_sorted
 
 
 @jit
@@ -225,3 +238,60 @@ class ComputeWeightsVtsOp(at.Op):
         return [grad_Samples,grad_H,grad_mbins,grad_edges,grad_ms,grad_rhos,grad_T,grad_kappa]
 
 compute_weights_vts_op = ComputeWeightsVtsOp()
+
+@jax_funcify.register(ComputeWeightsVtsOp)
+def jax_funcify_compute_weights_vts_op(op,**kwargs):
+    def compute_weights_vts_op(Samples,H,mbins,edges,ms,rhos,T,kappa):
+      return jax_compute_weights_vts_op(Samples,H,mbins,edges,ms,rhos,T,kappa)
+    return compute_weights_vts_op
+@jit
+def compute_gp_inputs(mbins):
+    logm_bin_centers = generate_logM_bin_centers(mbins)
+    k=0
+    for i in range(len(logm_bin_centers)):
+        for j in range(i+1):
+            dist_array[k] = np.linalg.norm(logm_bin_centers[i]-logm_bin_centers[j])
+            k+=1
+
+
+    scale_min = np.log(np.min(dist_array[dist_array!=0.]))
+    scale_max = np.log(np.max(dist_array))
+    scale_mean = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+    scale_sd = (scale_max - scale_min)/4
+    
+    return scale_mean,scale_sd, logm_bin_centers
+
+
+def run_gp_spectral_siren_model(Samples, mbins, ms, rhos, T,z_low,z_high):
+    
+    scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
+    Samples_var = ae.shared(Samples, borrow=True)
+    mbins_var = ae.shared(mbins, borrow=True)
+    ms_var = ae.shared(ms, borrow=True)
+    rhos_var = ae.shared(rhos, borrow=True)
+    T_var = ae.shared(T, borrow=True)
+    edges = bin_edges(mbins)
+    edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges])
+    edges_var = ae.shared(edges(mbins),borrow=True)
+    
+    with pm.Model() as model:
+        H = pm.Uniform('H_0',60,80)
+        mu = pm.Normal('mu',mu=0,sigma=5)#,shape=(len(xbins)-1))
+        sigma = pm.HalfNormal('sigma',sigma=1)
+        length_scale = pm.Lognormal('length_scale',mu=scale_mean,sigma=scale_sd)
+        covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
+        gp = pm.gp.Latent(cov_func=covariance)
+        logn_corr = gp.prior('logn_corr',X=logm_bin_centers)
+        logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+        n_corr = pm.Deterministic('n_corr',at.exp(logn_tot))
+
+        [weights,vts] = compute_weights_vts_op(Samples,H,mbins,edges,ms,rhos,T,kappa)
+
+        N_F_exp = pm.Deterministic('N_F_exp',at.sum(n_corr*vts))
+        log_l = pm.Potential('log_l',at.sum(at.log(at.dot(weights,n_corr)))-N_F_exp)
+        
+        trace = pm.sampling_jax.sample_numpyro_nuts(draws=1000,tune=100,
+                      chains=1,
+                      target_accept=0.9)
+        
+        return trace

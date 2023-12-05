@@ -190,3 +190,38 @@ def jax_compute_weights_vts_op(Samples,H,mbins,edges,ms,rhos,T,kappa):
   
   return [jnp.array(list(jax.lax.map(partial(compute_weight_single_ev,H=H,mbins=mbins,kappa=kappa),Samples))),
           jnp.array(list(jax.lax.map(partial(VT_bin, H=H,ms=ms,rhos=rhos,T=T,kappa=kappa), edges)))]
+
+class ComputeWeightsVtsOp(at.Op):
+    itypes = [at.dtensor3, at.dscalar, at.dvector, at.dtensor3, at.dvector, at.dtensor2, at.dscalar, at.dscalar]
+    otypes = [at.dmatrix,at.dvector]
+
+    def make_node(self, Samples,H,mbins,edges,ms,rhos,T,kappa):
+        Samples = at.as_tensor_variable(Samples)
+        H = at.as_tensor_variable(H)
+        mbins = at.as_tensor_variable(mbins)
+        edges = at.as_tensor_variable(edges)
+        ms = at.as_tensor_variable(ms)
+        rhos = at.as_tensor_variable(rhos)
+        T = at.as_tensor_variable(T)
+        H = at.as_tensor_variable(kappa)
+        return ae.graph.basic.Apply(self, [Samples,H,mbins,edges,ms,rhos,T,kappa], [at.dmatrix(),at.dvector()])
+
+    def perform(self, node, inputs, outputs):
+        Samples,H,mbins,edges,ms,rhos,T,kappa = inputs
+        out = jax_compute_weights_vts_op(Samples,H,mbins,edges,ms,rhos,T,kappa)
+        outputs[0][0] = out[0]
+        outputs[1][0] = out[1]
+        
+    def grad(self, inputs, gradients):
+        Samples,H,mbins,edges,ms,rhos,T,kappa = inputs
+        grad_Samples = at.zeros_like(Samples)
+        grad_H = at.zeros_like(H)
+        grad_mbins = at.zeros_like(mbins)
+        grad_edges = at.zeros_like(edges)
+        grad_ms = at.zeros_like(ms)
+        grad_rhos = at.zeros_like(rhos)
+        grad_T = at.zeros_like(T)
+        grad_kappa = at.zeros_like(kappa)
+        return [grad_Samples,grad_H,grad_mbins,grad_edges,grad_ms,grad_rhos,grad_T,grad_kappa]
+
+compute_weights_vts_op = ComputeWeightsVtsOp()

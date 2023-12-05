@@ -1,25 +1,21 @@
 __author__="Anarya Ray <anarya.ray@ligo.org>; Ignacio Maga\~na Hernandez <imhernan@andrew.cmu.edu>; Siddharth Mohite <siddharth.mohite@ligo.org>"
 
-import pymc as pm
-import pytensor.tensor as at
-import pytensor as ae
 import numpy as np
 import scipy
 import scipy.stats as ss
 import matplotlib.pyplot as plt
 from pylab import *
 from functools import partial
-
+import warnings
 import h5py
 
 import jax
-
 import jax.numpy as jnp
-
 import jax.scipy.stats as jss
-
+import pymc as pm
+import pytensor.tensor as at
+import pytensor as ae
 from pymc import sampling_jax
-
 from pytensor.link.jax.dispatch import jax_funcify
 
 import arviz as az
@@ -30,6 +26,7 @@ from jaxinterp2d import interp2d, CartesianGrid
 import tqdm
 from jax import jit
 
+warnings.warn("Warning... gppop-cosmo is an experimental module. Needs to be debugged, tested, and further optimized before it can produce correct results")
 
 seed = np.random.randint(1000)
 key = jax.random.PRNGKey(seed)
@@ -274,8 +271,8 @@ def make_gp_spectral_siren_model(Samples, mbins, ms, rhos, T,z_low,z_high):
     
     with pm.Model() as model:
         H = pm.Uniform('H_0',60,80)
-        kappa= at.as_tensor_variable(3.0) # pm.Uniform('kappa',0.,5.)
-        Om0 = at.as_tensor_variable(Om0Planck) # pm.Uniform('Om0',0.,1.)
+        kappa= pm.Deterministic('kappa', at.as_tensor_variable(3.0)) # pm.Uniform('kappa',0.,5.)
+        Om0 = pm.Deterministic('Om0',at.as_tensor_variable(Om0Planck)) # pm.Uniform('Om0',0.,1.)
         mu = pm.Normal('mu',mu=0,sigma=5)
         sigma = pm.HalfNormal('sigma',sigma=1)
         length_scale = pm.Lognormal('length_scale',mu=scale_mean,sigma=scale_sd)

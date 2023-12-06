@@ -25,6 +25,7 @@ dependencies = [ # Optional
   "arviz",
   "jax[cuda12]",
   "numpyro",
+  "tinygp",
   "pesummary",
   #"popsummary@git+https://git.ligo.org/zoheyr-doctor/popsummary.git",
   "jaxinterp2d@git+https://github.com/adam-coogan/jaxinterp2d.git"

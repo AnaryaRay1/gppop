@@ -9,9 +9,20 @@ from functools import partial
 import warnings
 import h5py
 
+import numpyro
+from numpyro import distributions as dist
+from numpyro.infer import MCMC
+from numpyro.infer import NUTS
+
+from tinygp import kernels, GaussianProcess
+
 import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jss
+
+jax.config.update("jax_enable_x64", True)
+
+
 import pymc as pm
 import pytensor.tensor as at
 import pytensor as ae
@@ -214,8 +225,8 @@ class ComputeWeightsVtsOp(at.Op):
     def perform(self, node, inputs, outputs):
         Samples,H,Om0,mbins,edges,ms,rhos,T,kappa = inputs
         out = jax_compute_weights_vts_op(Samples,H,Om0,mbins,edges,ms,rhos,T,kappa)
-        outputs[0][0] = np.array(out[0])
-        outputs[1][0] = np.array(out[1])
+        outputs[0][0] = np.asarray(out[0])
+        outputs[1][0] = np.asarray(out[1])
         
     def grad(self, inputs, gradients):
         Samples,H,Om0,mbins,edges,ms,rhos,T,kappa = inputs
@@ -256,10 +267,10 @@ def compute_gp_inputs(mbins):
     return scale_mean,scale_sd, logm_bin_centers
 
 
-def make_gp_spectral_siren_model(Samples, mbins, ms, rhos, T,z_low,z_high):
+def make_gp_spectral_siren_model_pymc(Samples, mbins, ms, rhos, T,z_low,z_high):
     
     scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
-    scale_mean,scale_sd, logm_bin_centers = np.asarray(scale_mean),np.asarray(scale_sd),np.asarray( logm_bin_centers)
+    scale_mean,scale_sd, logm_bin_centers = jnp.asarray(scale_mean),jnp.asarray(scale_sd),jnp.asarray( logm_bin_centers)
     Samples_var = ae.shared(Samples, borrow=True)
     mbins_var = ae.shared(mbins, borrow=True)
     ms_var = ae.shared(ms, borrow=True)
@@ -286,12 +297,12 @@ def make_gp_spectral_siren_model(Samples, mbins, ms, rhos, T,z_low,z_high):
         [weights,vts] = compute_weights_vts_op(Samples_var,H,Om0,mbins_var,edges_var,ms_var,rhos_var,T_var,kappa)
         N_F_exp = pm.Deterministic('N_F_exp',at.sum(n_corr*vts))
         
-        log_l = pm.Potential('log_l',at.reshape(at.sum(at.log(at.dot(weights,n_corr)))-N_F_exp,(1,)))
+        log_l = pm.Potential('log_l',at.sum(at.log(at.dot(weights,n_corr)))-N_F_exp)
         
         
         return model
 
-def sample(model,njobs=1,ndraw=1000,ntune=1000,target_accept = 0.9):
+def sample_pymc(model,njobs=1,ndraw=1000,ntune=1000,target_accept = 0.9):
     with model:
         trace = pm.sampling_jax.sample_numpyro_nuts(draws=ndraw,tune=ntune,
                       chains=njobs,
@@ -299,3 +310,54 @@ def sample(model,njobs=1,ndraw=1000,ntune=1000,target_accept = 0.9):
         
         return trace
         
+def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_centers, edges,ms, rhos, T, mbins):
+    
+    H = numpyro.sample("H0", dist.Uniform(50, 80))
+    kappa= numpyro.deterministic('kappa', 3.0) # numpyro.sample("kappa", dist.Unifogrm(0.,5.))
+    Om0 = numpyro.deterministic('Om0', Om0Planck) # numpyro.sample("Om0", dist.Unifogrm(0.,1.))
+    mu = numpyro.sample('mu', dist.Normal(0,5))
+    sigma = numpyro.sample('sigma', dist.HalfNormal(1))
+    length_scale = numpyro.sample('length_scale', dist.LogNormal(scale_mean,scale_sd))
+    
+    kernel = (sigma**2)*kernels.ExpSquared(length_scale)
+    gp = GaussianProcess(kernel, logm_bin_centers, diag=0, mean=mean)
+    
+    logn_tot = numpyro.sample('logn_tot',gp.numpyro_dist())
+   
+    n_corr = numpyro.deterministic('n_corr',jnp.exp(logn_tot))
+
+
+    [weights,vts] = jax_compute_weights_vts_op(Samples,H,Om0,mbins,edges,ms,rhos,T,kappa)
+    
+    N_F_exp = numpyro.deterministic('N_F_exp',jnp.sum(n_corr*vts))
+
+    numpyro.factor('log_likelihood',jnp.sum(jnp.log(jnp.dot(weights,n_corr)))-N_F_exp)
+    
+
+def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
+        num_warmup=10,
+        num_samples=100,
+        num_chains=1):
+    edges = bin_edges(mbins)
+    edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
+    
+    scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
+    scale_mean,scale_sd, logm_bin_centers = jnp.asarray(scale_mean),jnp.asarray(scale_sd),jnp.asarray( logm_bin_centers)
+
+    
+    RNG = jax.random.PRNGKey(0)
+    MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)
+    kernel = NUTS(gp_spectral_siren_model_numpyro)
+    mcmc = MCMC(
+        kernel,
+        thinning=thinning,
+        num_warmup=num_warmup,
+        num_samples=num_samples,
+        num_chains=num_chains,
+    )
+
+    mcmc.run(PRIOR_RNG,Samples, scale_mean,scale_sd, logm_bin_centers,edges, ms, osnrs, Tobs,mbins)
+    
+    return mcmc.get_samples()
+
+            

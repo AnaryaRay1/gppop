@@ -18,7 +18,7 @@ dependencies = [ # Optional
   "numpy",
   "scipy",
   "h5py",
-  "pymc",
+  "pymc>=5.9",
   "pytensor",
   "astropy",
   "scikit-learn",

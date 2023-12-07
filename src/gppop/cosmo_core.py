@@ -14,8 +14,6 @@ from numpyro import distributions as dist
 from numpyro.infer import MCMC
 from numpyro.infer import NUTS
 
-from tinygp import kernels, GaussianProcess
-
 import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jss
@@ -36,6 +34,8 @@ from astropy import constants, units as u
 from jaxinterp2d import interp2d, CartesianGrid
 import tqdm
 from jax import jit
+
+jax.config.update("jax_enable_x64", True)
 
 warnings.warn("Warning... gppop-cosmo is an experimental module. Needs to be debugged, tested, and further optimized before it can produce correct results")
 
@@ -88,8 +88,6 @@ def ddL_of_z(z,dL,H0,Om0=Om0Planck):
     return dL/(1+z) + speed_of_light*(1+z)/(H0*E(z,Om0))
 
 
-#H_true = cosmology.Planck18.H0.value
-#@jit
 def bin_edges(mbins):
     m1 = mbins
     m2 = mbins
@@ -135,9 +133,7 @@ def compute_weight_single_ev(samples,H=70.,Om0 = Om0Planck,mbins=10.,kappa=3):
     ddL_dz = ddL_of_z(z_samples,d_samples,H,Om0=Om0) 
     pz_PE = (1+z_samples)**2 * d_samples**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
     pz_weight = pz_pop/pz_PE
-
-    
-    #weight[sindices,m1_indices,m2_indices] = pz_weight *(1+z_samples)**2/ (m1d_samples*m2d_samples) 
+ 
     weight = jnp.sum(weight.at[sindices,m1_indices,m2_indices].set( pz_weight *(1+z_samples)**2/ (m1d_samples*m2d_samples)),axis=0)
     normalized_weight = weight/nsamples
     return normalized_weight[jnp.tril_indices(len(weight))]
@@ -176,8 +172,7 @@ def Pdet_msdet(m1det, m2det, dL, ms, rhos, ref_dist_Gpc = 1.0, dist_unit = u.Mpc
     rand_noise: add random N(0,1)
     """
     dL_Gpc = dL*((1.*dist_unit).to(u.Gpc)).value
-    # if dL_Gpc == 0.0:
-    #     return 1.0
+    
     if rand_noise:
         noise = rns
     else:
@@ -309,6 +304,15 @@ def sample_pymc(model,njobs=1,ndraw=1000,ntune=1000,target_accept = 0.9):
                       target_accept=target_accept)
         
         return trace
+
+@jit
+def kernel(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
+    deltaXsq = jnp.sum(jnp.power((X[jnp.newaxis,:,:]-X[:,jnp.newaxis,:])/length, 2.0),axis=-1)
+    k = var * jnp.exp(-0.5 * deltaXsq)
+    if include_noise:
+        k += (noise + jitter) * jnp.eye(X.shape[0])
+    return k
+
         
 def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_centers, edges,ms, rhos, T, mbins):
     
@@ -319,10 +323,9 @@ def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_cente
     sigma = numpyro.sample('sigma', dist.HalfNormal(1))
     length_scale = numpyro.sample('length_scale', dist.LogNormal(scale_mean,scale_sd))
     
-    kernel = (sigma**2)*kernels.ExpSquared(length_scale)
-    gp = GaussianProcess(kernel, logm_bin_centers, diag=0, mean=mean)
+    cov = kernel(logm_bin_centers, logm_bin_centers, jnp.power(sigma,2.0), length_scale, 0.)
     
-    logn_tot = numpyro.sample('logn_tot',gp.numpyro_dist())
+    logn_tot = numpyro.sample('logn_tot',dist.MultivariateNormal(loc=mu, covariance_matrix=cov))
    
     n_corr = numpyro.deterministic('n_corr',jnp.exp(logn_tot))
 
@@ -360,4 +363,46 @@ def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
     
     return mcmc.get_samples()
 
-            
+        
+def gp_fixed_cosmo_model_numpyro(weights,vts, scale_mean,scale_sd, logm_bin_centers):
+    mu = numpyro.sample('mu', dist.Normal(0,5))
+    sigma = numpyro.sample('sigma', dist.HalfNormal(1))
+    length_scale = numpyro.sample('length_scale', dist.LogNormal(scale_mean,scale_sd))
+    
+    cov = kernel(logm_bin_centers, logm_bin_centers, jnp.power(sigma,2.0), length_scale, 0.)
+    
+    
+    logn_tot = numpyro.sample('logn_tot',dist.MultivariateNormal(loc=mu, covariance_matrix=cov))
+   
+    n_corr = numpyro.deterministic('n_corr',jnp.exp(logn_tot))
+    
+    N_F_exp = numpyro.deterministic('N_F_exp',jnp.sum(n_corr*vts))
+
+    numpyro.factor('log_likelihood',jnp.sum(jnp.log(jnp.dot(weights,n_corr)))-N_F_exp)
+
+def sample_numpyro_fixed_cosmo(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
+        num_warmup=10,
+        num_samples=100,
+        num_chains=1):
+    edges = bin_edges(mbins)
+    edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
+    
+    scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
+    scale_mean,scale_sd, logm_bin_centers = jnp.asarray(scale_mean),jnp.asarray(scale_sd),jnp.asarray( logm_bin_centers)
+
+    [weights,vts] = jax_compute_weights_vts_op(Samples,Planck15.H0.value,Planck15.Om0,mbins,edges,ms,osnrs,Tobs,3.0)
+    
+    RNG = jax.random.PRNGKey(0)
+    MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)
+    kernel = NUTS( gp_fixed_cosmo_model_numpyro)
+    mcmc = MCMC(
+        kernel,
+        thinning=thinning,
+        num_warmup=num_warmup,
+        num_samples=num_samples,
+        num_chains=num_chains,
+    )
+
+    mcmc.run(PRIOR_RNG, weights,vts, scale_mean,scale_sd, logm_bin_centers)
+    
+    return mcmc.get_samples()

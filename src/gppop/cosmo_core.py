@@ -33,7 +33,7 @@ from astropy import constants, units as u
 
 from jaxinterp2d import interp2d, CartesianGrid
 import tqdm
-from jax import jit
+from jax import jit, vmap
 
 jax.config.update("jax_enable_x64", True)
 

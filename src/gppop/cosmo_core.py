@@ -197,10 +197,15 @@ def VT_bin(edges,H=70.,Om0 = Om0Planck, ms=10.0,rhos=15.0,T=1,ngrid=10,kappa=3):
     return jnp.trapz(jnp.trapz(jnp.trapz(VT,z_grid,axis=2),m2_grid,axis=1),m1_grid)/(1.+(m1_low==m2_low))
 
 @jit
-def jax_compute_weights_vts_op(Samples,H,Om0,mbins,edges,ms,rhos,T,kappa):
-  
-  return [jnp.array(list(jax.lax.map(partial(compute_weight_single_ev,H=H,Om0=Om0,mbins=mbins,kappa=kappa),Samples))),
-          jnp.array(list(jax.lax.map(partial(VT_bin, H=H,Om0=Om0,ms=ms,rhos=rhos,T=T,kappa=kappa), edges)))]
+def jax_compute_weights_vts_op(Samples, H, Om0, mbins, edges, ms, rhos, T, kappa):
+    compute_weight_single_ev_partial = partial(compute_weight_single_ev, H=H, Om0=Om0, mbins=mbins, kappa=kappa)
+    VT_bin_partial = partial(VT_bin, H=H, Om0=Om0, ms=ms, rhos=rhos, T=T, kappa=kappa)
+    
+    # Use vmap for vectorizing computations
+    compute_weight_results = vmap(compute_weight_single_ev_partial)(Samples)
+    VT_bin_results = vmap(VT_bin_partial)(edges)
+    
+    return [compute_weight_results, VT_bin_results]
 
 class ComputeWeightsVtsOp(at.Op):
     itypes = [at.dtensor3, at.dscalar, at.dscalar, at.dvector, at.dtensor3, at.dvector, at.dmatrix, at.dscalar, at.dscalar]

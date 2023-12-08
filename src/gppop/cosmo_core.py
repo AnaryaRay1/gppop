@@ -346,7 +346,7 @@ def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_cente
 def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
         num_warmup=10,
         num_samples=100,
-        num_chains=1):
+        num_chains=1,target_accept_prob=0.9):
     edges = bin_edges(mbins)
     edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
     
@@ -356,7 +356,7 @@ def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
     
     RNG = jax.random.PRNGKey(0)
     MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)
-    kernel = NUTS(gp_spectral_siren_model_numpyro)
+    kernel = NUTS(gp_spectral_siren_model_numpyro, target_accept_prob= target_accept_prob)
     mcmc = MCMC(
         kernel,
         thinning=thinning,
@@ -389,7 +389,7 @@ def gp_fixed_cosmo_model_numpyro(weights,vts, scale_mean,scale_sd, logm_bin_cent
 def sample_numpyro_fixed_cosmo(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
         num_warmup=10,
         num_samples=100,
-        num_chains=1):
+        num_chains=1,target_accept_prob=0.9):
     edges = bin_edges(mbins)
     edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
     
@@ -400,7 +400,7 @@ def sample_numpyro_fixed_cosmo(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thin
     
     RNG = jax.random.PRNGKey(0)
     MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)
-    kernel = NUTS( gp_fixed_cosmo_model_numpyro)
+    kernel = NUTS( gp_fixed_cosmo_model_numpyro,target_accept_prob=target_accept_prob)
     mcmc = MCMC(
         kernel,
         thinning=thinning,

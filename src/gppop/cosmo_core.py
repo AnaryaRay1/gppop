@@ -40,7 +40,7 @@ jax.config.update("jax_enable_x64", True)
 warnings.warn("Warning... gppop-cosmo is an experimental module. Needs to be debugged, tested, and further optimized before it can produce correct results")
 
 seed = np.random.randint(1000)
-key = jax.random.PRNGKey(seed)
+key = jax.random.PRNGKey(1000)
 
 
 zMax = 5
@@ -138,7 +138,6 @@ def compute_weight_single_ev(samples,H=70.,Om0 = Om0Planck,mbins=10.,kappa=3):
     normalized_weight = weight/nsamples
     return normalized_weight[jnp.tril_indices(len(weight))]
 
-@jit
 def draw_thetas(N=10000):
     """Draw `N` random angular factors for the SNR.
 
@@ -148,18 +147,20 @@ def draw_thetas(N=10000):
     Author: Will Farr
     """
 
-    cos_thetas = jax.random.uniform(key,minval=-1, maxval=1, shape = (N,))
-    cos_incs = jax.random.uniform(key,minval=-1, maxval=1, shape=(N,))
-    phis = jax.random.uniform(key,minval=0, maxval=2*np.pi, shape=(N,))
-    zetas = jax.random.uniform(key,minval=0, maxval=2*np.pi, shape=(N,))
+    cos_thetas = np.random.uniform(low=-1, high=1, size=N)
+    cos_incs = np.random.uniform(low=-1, high=1, size=N)
+    phis = np.random.uniform(low=0, high=2*np.pi, size=N)
+    zetas = np.random.uniform(low=0, high=2*np.pi, size=N)
 
-    Fps = 0.5*jnp.cos(2*zetas)*(1 + jnp.square(cos_thetas))*jnp.cos(2*phis) - jnp.sin(2*zetas)*cos_thetas*jnp.sin(2*phis)
-    Fxs = 0.5*jnp.sin(2*zetas)*(1 + jnp.square(cos_thetas))*jnp.cos(2*phis) + jnp.cos(2*zetas)*cos_thetas*jnp.sin(2*phis)
+    Fps = 0.5*np.cos(2*zetas)*(1 + np.square(cos_thetas))*np.cos(2*phis) - np.sin(2*zetas)*cos_thetas*np.sin(2*phis)
+    Fxs = 0.5*np.sin(2*zetas)*(1 + np.square(cos_thetas))*np.cos(2*phis) + np.cos(2*zetas)*cos_thetas*np.sin(2*phis)
+
+    return np.sqrt(0.25*np.square(Fps)*np.square(1 + np.square(cos_incs)) + np.square(Fxs)*np.square(cos_incs))
 
     return jnp.sqrt(0.25*jnp.square(Fps)*jnp.square(1 + jnp.square(cos_incs)) + jnp.square(Fxs)*jnp.square(cos_incs))
 
-thetas = draw_thetas()
-rns = np.random.randn(10000)
+thetas = jnp.array(draw_thetas(10000))
+rns = jnp.array(np.random.randn(10000))
 
 @jit
 def Pdet_msdet(m1det, m2det, dL, ms, rhos, ref_dist_Gpc = 1.0, dist_unit = u.Mpc, rand_noise = False, thresh=8.0):
@@ -178,7 +179,7 @@ def Pdet_msdet(m1det, m2det, dL, ms, rhos, ref_dist_Gpc = 1.0, dist_unit = u.Mpc
     else:
         noise = 0.0
     #Implement Eq. (i)
-    return jnp.mean((interp2d(m1det,m2det,ms,ms,rhos)*ref_dist_Gpc/dL_Gpc)[:,:,:,jnp.newaxis]*(thetas[jnp.newaxis,jnp.newaxis,jnp.newaxis,:])+rns[jnp.newaxis,jnp.newaxis,jnp.newaxis,:]>thresh)
+    return jnp.mean((interp2d(m1det,m2det,ms,ms,rhos)*ref_dist_Gpc/dL_Gpc)[:,:,:,jnp.newaxis]*(thetas[jnp.newaxis,jnp.newaxis,jnp.newaxis,:])+rns[jnp.newaxis,jnp.newaxis,jnp.newaxis,:]>thresh,axis=-1)
 
 
 @jit

@@ -197,6 +197,39 @@ def VT_bin(edges,H=70.,Om0 = Om0Planck, ms=10.0,rhos=15.0,T=1,ngrid=10,kappa=3):
     return jnp.trapz(jnp.trapz(jnp.trapz(VT,z_grid,axis=2),m2_grid,axis=1),m1_grid)/(1.+(m1_low==m2_low))
 
 @jit
+def jax_compute_weights(samples, mbins, H=70., Om0 = Om0Planck, kappa=3):
+    nEvents = 147
+    
+    m1d_samples = samples[:,:,0].flatten()
+    m2d_samples = samples[:,:,1].flatten()
+    d_samples = samples[:,:,2].flatten()
+
+    z_samples = z_of_dL(d_samples,H,Om0=Om0)
+    
+    pz_pop = dV_of_z(z_samples,H,Om0=Om0) *(1+z_samples)**(kappa-1) #uniform in comoving-volume
+    ddL_dz = ddL_of_z(z_samples,d_samples,H,Om0=Om0) 
+    pz_PE = (1+z_samples)**2 * d_samples**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+    pz_weight = pz_pop/pz_PE
+    
+    nbins_m = len(mbins)-1
+    nsamples = len(m1d_samples)
+    sindices = jnp.arange(nsamples)
+    weights = jnp.zeros((nsamples,nbins_m,nbins_m))
+        
+    m1_indices = jnp.clip(jnp.searchsorted(mbins, m1d_samples/(1+z_samples), side='right')- 1, a_min=0, a_max=nbins_m - 1)
+    m2_indices = jnp.clip(jnp.searchsorted(mbins, m2d_samples/(1+z_samples), side='right')- 1, a_min=0, a_max=nbins_m - 1)
+ 
+    weights = weights.at[sindices,m1_indices,m2_indices].set( pz_weight *(1+z_samples)**2/ (m1d_samples*m2d_samples))
+    weights = jnp.asarray(jnp.split(weights,nEvents))
+    weights = weights.sum(axis=1)
+    
+    normalized_weight = weights/(nsamples/nEvents)
+    
+    index = jnp.tril_indices(nbins_m)
+    
+    return normalized_weight[:,index[0], index[1]]
+
+@jit
 def jax_compute_weights_vts_op(Samples, H, Om0, mbins, edges, ms, rhos, T, kappa):
     compute_weight_single_ev_partial = partial(compute_weight_single_ev, H=H, Om0=Om0, mbins=mbins, kappa=kappa)
     VT_bin_partial = partial(VT_bin, H=H, Om0=Om0, ms=ms, rhos=rhos, T=T, kappa=kappa)
@@ -206,6 +239,15 @@ def jax_compute_weights_vts_op(Samples, H, Om0, mbins, edges, ms, rhos, T, kappa
     VT_bin_results = vmap(VT_bin_partial)(edges)
     
     return [compute_weight_results, VT_bin_results]
+
+@jit
+def jax_compute_vts_op(Samples, edges, H, Om0, ms, rhos, T, kappa):
+    VT_bin_partial = partial(VT_bin, H=H, Om0=Om0, ms=ms, rhos=rhos, T=T, kappa=kappa)
+    
+    # Use vmap for vectorizing computations
+    VT_bin_results = vmap(VT_bin_partial)(edges)
+    
+    return VT_bin_results
 
 class ComputeWeightsVtsOp(at.Op):
     itypes = [at.dtensor3, at.dscalar, at.dscalar, at.dvector, at.dtensor3, at.dvector, at.dmatrix, at.dscalar, at.dscalar]

@@ -320,10 +320,10 @@ def kernel(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
     return k
 
         
-def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_centers, edges,ms, rhos, T, mbins):
+def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_centers, edges,ms, rhos, T, mbins,kappa):
     
     H = numpyro.sample("H0", dist.Uniform(50, 80))
-    kappa= numpyro.deterministic('kappa', 3.0) # numpyro.sample("kappa", dist.Unifogrm(0.,5.))
+    kappa= numpyro.deterministic('kappa', kappa) # numpyro.sample("kappa", dist.Unifogrm(0.,5.))
     Om0 = numpyro.deterministic('Om0', Om0Planck) # numpyro.sample("Om0", dist.Unifogrm(0.,1.))
     mu = numpyro.sample('mu', dist.Normal(0,5))
     sigma = numpyro.sample('sigma', dist.HalfNormal(1))
@@ -346,7 +346,7 @@ def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_cente
 def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
         num_warmup=10,
         num_samples=100,
-        num_chains=1,target_accept_prob=0.9):
+        num_chains=1,target_accept_prob=0.9,kappa=3.0):
     edges = bin_edges(mbins)
     edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
     
@@ -365,7 +365,7 @@ def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
         num_chains=num_chains,
     )
 
-    mcmc.run(PRIOR_RNG,Samples, scale_mean,scale_sd, logm_bin_centers,edges, ms, osnrs, Tobs,mbins)
+    mcmc.run(PRIOR_RNG,Samples, scale_mean,scale_sd, logm_bin_centers,edges, ms, osnrs, Tobs,mbins,kappa)
     
     return mcmc.get_samples()
 
@@ -389,14 +389,14 @@ def gp_fixed_cosmo_model_numpyro(weights,vts, scale_mean,scale_sd, logm_bin_cent
 def sample_numpyro_fixed_cosmo(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
         num_warmup=10,
         num_samples=100,
-        num_chains=1,target_accept_prob=0.9):
+        num_chains=1,target_accept_prob=0.9,kappa=3.0):
     edges = bin_edges(mbins)
     edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
     
     scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
     scale_mean,scale_sd, logm_bin_centers = jnp.asarray(scale_mean),jnp.asarray(scale_sd),jnp.asarray( logm_bin_centers)
 
-    [weights,vts] = jax_compute_weights_vts_op(Samples,Planck15.H0.value,Planck15.Om0,mbins,edges,ms,osnrs,Tobs,3.0)
+    [weights,vts] = jax_compute_weights_vts_op(Samples,Planck15.H0.value,Planck15.Om0,mbins,edges,ms,osnrs,Tobs,kappa)
     
     RNG = jax.random.PRNGKey(0)
     MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)

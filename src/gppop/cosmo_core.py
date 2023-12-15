@@ -125,6 +125,38 @@ def compute_weight_single_ev(samples,H=70.,Om0 = Om0Planck,mbins=10.,kappa=3):
     normalized_weight = weight/nsamples
     return normalized_weight[jnp.tril_indices(len(weight))]
 
+@jit
+def VT_numerical(det_samples, p_draw, mbins, Ndraw, H=70., Om0 = Om0Planck, T=1, kappa=3):
+    m1d_samples = det_samples[:,0]
+    m2d_samples = det_samples[:,1]
+    d_samples = det_samples[:,2]
+    
+    nbins_m = len(mbins)-1
+    nsamples = len(m1d_samples)
+    sindices = jnp.arange(nsamples)
+    vts = jnp.zeros((nsamples,nbins_m,nbins_m))
+    
+    z_samples = z_of_dL(d_samples,H,Om0=Om0)
+    pz_pop = T*dV_of_z(z_samples,H,Om0=Om0) *(1+z_samples)**(kappa-1)
+    p_pop = pz_pop*(1+z_samples)**2/ (m1d_samples*m2d_samples)
+    
+    ddL_dz = ddL_of_z(z_samples,d_samples,H,Om0=Om0)
+    #jac = (1+z_samples)**2 *  ddL_dz
+    
+    weight = p_pop/p_draw#/jac
+    
+    m1_indices = jnp.clip(jnp.searchsorted(mbins, m1d_samples/(1+z_samples), side='right')- 1, a_min=0, a_max=nbins_m - 1)
+    m2_indices = jnp.clip(jnp.searchsorted(mbins, m2d_samples/(1+z_samples), side='right')- 1, a_min=0, a_max=nbins_m - 1)
+ 
+    vts = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight),axis=0)
+    
+    
+    
+    normalized_vts = vts/(Ndraw)
+    
+    return normalized_vts[jnp.tril_indices(nbins_m)]
+
+
 def draw_thetas(N=10000):
     """Draw `N` random angular factors for the SNR.
 
@@ -167,19 +199,20 @@ def Pdet_msdet(m1det, m2det, dL, ms, rhos, ref_dist_Gpc = 1.0, dist_unit = u.Mpc
     #Implement Eq. (i)
     return jnp.mean((interp2d(m1det,m2det,ms,ms,rhos)*ref_dist_Gpc/dL_Gpc)[:,:,:,jnp.newaxis]*(thetas[jnp.newaxis,jnp.newaxis,jnp.newaxis,:])+rns[jnp.newaxis,jnp.newaxis,jnp.newaxis,:]>thresh,axis=-1)
 
+'''
 @jit
 def VT_bin(edges,H=70.,Om0 = Om0Planck, ms=10.0,rhos=15.0,T=1,ngrid=10,kappa=3):
     m1_low,m1_high,m2_low,m2_high,z_low,z_high = edges[0,0],edges[1,0],edges[0,1],edges[1,1],edges[0,2],edges[1,2]
     z_grid = jnp.linspace(z_low,z_high,ngrid)
     m1_grid = jnp.linspace(m1_low,m1_high,ngrid)
     m2_grid = jnp.linspace(m2_low,m2_high,ngrid)
-    
     m1s,m2s,zs = jnp.meshgrid(m1_grid,m2_grid,z_grid,indexing='ij')
     v = dV_of_z(zs,H,Om0=Om0)*(1+zs)**(kappa-1)*((u.Mpc**3).to(u.Gpc**3))
     ds = dL_of_z(zs,H,Om0=Om0)
     VT = Pdet_msdet(m1s*(1+zs),m2s*(1+zs),ds,ms,rhos)*v*T/(m1s*m2s)
     
     return jnp.trapz(jnp.trapz(jnp.trapz(VT,z_grid,axis=2),m2_grid,axis=1),m1_grid)/(1.+(m1_low==m2_low))
+
 
 @jit
 def jax_compute_weights(samples, mbins, H=70., Om0 = Om0Planck, kappa=3):
@@ -214,25 +247,29 @@ def jax_compute_weights(samples, mbins, H=70., Om0 = Om0Planck, kappa=3):
     
     return normalized_weight[:,index[0], index[1]]
 
-@jit
-def jax_compute_weights_vts_op(Samples, H, Om0, mbins, edges, ms, rhos, T, kappa):
-    compute_weight_single_ev_partial = partial(compute_weight_single_ev, H=H, Om0=Om0, mbins=mbins, kappa=kappa)
-    VT_bin_partial = partial(VT_bin, H=H, Om0=Om0, ms=ms, rhos=rhos, T=T, kappa=kappa)
-    
-    # Use vmap for vectorizing computations
-    compute_weight_results = vmap(compute_weight_single_ev_partial)(Samples)
-    VT_bin_results = vmap(VT_bin_partial)(edges)
-    
-    return [compute_weight_results, VT_bin_results]
+
 
 @jit
-def jax_compute_vts_op(Samples, edges, H, Om0, ms, rhos, T, kappa):
+def jax_compute_vts_op(edges, H, Om0, ms, rhos, T, kappa):
     VT_bin_partial = partial(VT_bin, H=H, Om0=Om0, ms=ms, rhos=rhos, T=T, kappa=kappa)
     
     # Use vmap for vectorizing computations
     VT_bin_results = vmap(VT_bin_partial)(edges)
     
     return VT_bin_results
+'''
+
+@jit
+def jax_compute_weights_vts_op(Samples,det_samples,pdraw, Ndraw, H, Om0, mbins, T, kappa):
+    compute_weight_single_ev_partial = partial(compute_weight_single_ev, H=H, Om0=Om0, mbins=mbins, kappa=kappa)
+    #VT_bin_partial = partial(VT_bin, H=H, Om0=Om0, ms=ms, rhos=rhos, T=T, kappa=kappa)
+    
+    # Use vmap for vectorizing computations
+    compute_weight_results = vmap(compute_weight_single_ev_partial)(Samples)
+    #VT_bin_results = vmap(VT_bin_partial)(edges)
+    VT_numerical_results = VT_numerical(det_samples, pdraw, mbins, Ndraw, H=H, Om0 = Om0, T=T, kappa=kappa)
+    
+    return [compute_weight_results, VT_numerical_results]# VT_bin_results]
 
 def compute_gp_inputs(mbins):
     logm_bin_centers = generate_logM_bin_centers(mbins)
@@ -257,7 +294,7 @@ def kernel(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
         k += (noise + jitter) * jnp.eye(X.shape[0])
     return k
 
-def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_centers, edges,ms, rhos, T, mbins,kappa):
+def gp_spectral_siren_model_numpyro(Samples,det_samples,pdraw, Ndraw, scale_mean,scale_sd, logm_bin_centers, T, mbins,kappa):
     H = numpyro.sample("H0", dist.Uniform(50, 80))
     kappa= numpyro.deterministic('kappa', kappa) # numpyro.sample("kappa", dist.Unifogrm(0.,5.))
     Om0 = numpyro.deterministic('Om0', Om0Planck) # numpyro.sample("Om0", dist.Unifogrm(0.,1.))
@@ -269,17 +306,17 @@ def gp_spectral_siren_model_numpyro(Samples, scale_mean,scale_sd, logm_bin_cente
     logn_tot = numpyro.sample('logn_tot',dist.MultivariateNormal(loc=mu, covariance_matrix=cov))
     n_corr = numpyro.deterministic('n_corr',jnp.exp(logn_tot))
 
-    [weights,vts] = jax_compute_weights_vts_op(Samples,H,Om0,mbins,edges,ms,rhos,T,kappa)
+    [weights,vts] = jax_compute_weights_vts_op(Samples,det_samples,pdraw, Ndraw, H, Om0, mbins, T, kappa)
     
     N_F_exp = numpyro.deterministic('N_F_exp',jnp.sum(n_corr*vts))
     numpyro.factor('log_likelihood',jnp.sum(jnp.log(jnp.dot(weights,n_corr)))-N_F_exp)
 
-def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
+def sample_numpyro(Samples,det_samples,pdraw, Ndraw, mbins, Tobs, thinning=100,
         num_warmup=10,
         num_samples=100,
         num_chains=1,target_accept_prob=0.9,kappa=3.0):
-    edges = bin_edges(mbins)
-    edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
+#     edges = bin_edges(mbins)
+#     edges = jnp.array([[[e[0,0],e[0,1],z_low],[e[1,0],e[1,1],z_high]] for e in edges]).astype('float32')
     
     scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
     scale_mean,scale_sd, logm_bin_centers = jnp.asarray(scale_mean),jnp.asarray(scale_sd),jnp.asarray( logm_bin_centers)
@@ -295,7 +332,7 @@ def sample_numpyro(Samples, mbins, ms, osnrs, Tobs,z_low,z_high,thinning=100,
         num_chains=num_chains,
     )
 
-    mcmc.run(PRIOR_RNG,Samples, scale_mean,scale_sd, logm_bin_centers,edges, ms, osnrs, Tobs,mbins,kappa)
+    mcmc.run(PRIOR_RNG,Samples,det_samples,pdraw, Ndraw, scale_mean,scale_sd, logm_bin_centers, Tobs, mbins,kappa)
     
     return mcmc.get_samples()
 

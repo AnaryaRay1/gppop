@@ -29,6 +29,8 @@ from astropy import constants, units as u
 from jaxinterp2d import interp2d, CartesianGrid
 
 from logbesselk.jax import log_bessel_k as log_k
+
+
 log_k_vec = jax.jit(jax.vmap(log_k,(None,0),0))
 
 jax.config.update("jax_enable_x64", True)
@@ -61,25 +63,31 @@ rs = rs.reshape(len(Om0grid),len(zgrid))
 def E(z,Om0=Om0Planck):
     return jnp.sqrt(Om0*(1+z)**3 + (1.0-Om0))
 
+
 @jit
 def r_of_z(z,H0,Om0=Om0Planck):
     return interp2d(Om0,z,Om0grid,zgrid,rs)*(H0Planck/H0)
+
 
 @jit
 def dL_of_z(z,H0,Om0=Om0Planck):
     return (1+z)*r_of_z(z,H0,Om0)
 
+
 @jit
 def z_of_dL(dL,H0,Om0=Om0Planck):
     return jnp.interp(dL,dL_of_z(zgrid,H0,Om0),zgrid)
+
 
 @jit
 def dV_of_z(z,H0,Om0=Om0Planck):
     return speed_of_light*r_of_z(z,H0,Om0)**2/(H0*E(z,Om0))
 
+
 @jit
 def ddL_of_z(z,dL,H0,Om0=Om0Planck):
     return dL/(1+z) + speed_of_light*(1+z)/(H0*E(z,Om0))
+
 
 def bin_edges(mbins):
     m1 = mbins
@@ -92,6 +100,7 @@ def bin_edges(mbins):
             edge_array.append([[m1[i],m2[j]],[m1[i+1],m2[j+1]]])
     return jnp.array(edge_array)
 
+
 def generate_logM_bin_centers(mbins):
     log_m1 = np.log(np.asarray(mbins))
     log_m2 = np.log(np.asarray(mbins))
@@ -103,6 +112,7 @@ def generate_logM_bin_centers(mbins):
     logM_lower_tri = np.asarray([a for a in logM if a[1] <= a[0]])
     logM_lower_tri_sorted = np.asarray([logM_lower_tri[i] for i in np.argsort(logM_lower_tri[:,0],kind='mergesort')])
     return jnp.asarray(logM_lower_tri_sorted)
+
 
 @jit
 def compute_weight_single_ev(samples,mbins,H0=H0Planck,Om0=Om0Planck,kappa=3):
@@ -135,14 +145,17 @@ def compute_weight_single_ev(samples,mbins,H0=H0Planck,Om0=Om0Planck,kappa=3):
 
     return [weight_means[jnp.tril_indices(len(weight_means))], jnp.sqrt(weight_vars[jnp.tril_indices(len(weight_means))])]
 
+
 @jit
 def log_prob_spin(sx,sy,sz,m):
     s_max = jnp.where(m<2.5,0.4,0.99)
     return jnp.log(1./(4*np.pi*s_max*(sx**2 + sy**2 + sz**2)))
 
+
 @jit
 def reweight_pinjection(tril_weights):
     return jnp.where((tril_weights!=0),jnp.exp(tril_weights),0)
+
 
 @jit
 def VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0Planck, Om0=Om0Planck, kappa=3, T=1, mixture_weights=1.0,):#,include_spins = True):
@@ -191,6 +204,7 @@ def jax_compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om
 
     return [compute_weight_results[0,:,:], compute_weight_results[1,:,:], VT_numerical_means, VT_numerical_sigmas]
 
+
 def compute_gp_inputs(mbins):
     logm_bin_centers = generate_logM_bin_centers(mbins)
     dist_array = jnp.zeros(int(len(logm_bin_centers)*(len(logm_bin_centers)+1)/2))
@@ -207,7 +221,8 @@ def compute_gp_inputs(mbins):
     scale_mean = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
     scale_sd = (scale_max - scale_min)/4
 
-    return scale_mean,scale_sd, logm_bin_centers
+    return scale_mean, scale_sd, logm_bin_centers
+
 
 @jit
 def kernel_RBF(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
@@ -217,6 +232,7 @@ def kernel_RBF(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
     if include_noise:
         k += (noise + jitter) * jnp.eye(X.shape[0])
     return k
+
 
 @jit
 def kernel_matern(X, Z, alpha, var, length, noise, jitter=1.0e-6, include_noise=True):
@@ -228,6 +244,7 @@ def kernel_matern(X, Z, alpha, var, length, noise, jitter=1.0e-6, include_noise=
         k += (noise + jitter) * jnp.eye(X.shape[0])
     return k
 
+
 @jit
 def kernel_matern_3_by_2(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
     m = 0
@@ -238,6 +255,7 @@ def kernel_matern_3_by_2(X, Z, var, length, noise, jitter=1.0e-6, include_noise=
     if include_noise:
         k += (noise + jitter) * jnp.eye(X.shape[0])
     return k
+
 
 @jit
 def kernel_matern_int(X, Z, ms, var, length, noise, jitter=1.0e-6, include_noise=True):
@@ -256,8 +274,12 @@ def kernel_matern_int(X, Z, ms, var, length, noise, jitter=1.0e-6, include_noise
         k += (noise + jitter) * jnp.eye(X.shape[0])
     return k
 
-def gp_spectral_siren_model_numpyro(samples, det_samples, pdraw, Ndraw, scale_mean, scale_sd, logm_bin_centers, T, mbins, kappa_true, sigma_sd, mu_dim):
-    H0 = numpyro.sample("H0", dist.Uniform(40, 100))
+
+def gp_spectral_siren_model_numpyro(samples, det_samples, pdraw, Ndraw, 
+                                    scale_mean, scale_sd, logm_bin_centers, T, 
+                                    mbins, kappa_true, sigma_sd, mu_dim, H0min=40, H0max=100):
+    
+    H0 = numpyro.sample("H0", dist.Uniform(H0min, H0max))
     Om0 = numpyro.deterministic('Om0', Om0Planck) # numpyro.sample("Om0", dist.Unifogrm(0.,1.))
     mu = numpyro.sample('mu', dist.Normal(0,5),sample_shape=(mu_dim,))
     sigma = numpyro.sample('sigma', dist.HalfNormal(sigma_sd))
@@ -268,25 +290,29 @@ def gp_spectral_siren_model_numpyro(samples, det_samples, pdraw, Ndraw, scale_me
     logn_tot = numpyro.sample('logn_tot',dist.MultivariateNormal(loc=mu, covariance_matrix=cov))
     n_corr = numpyro.deterministic('n_corr',jnp.exp(logn_tot))
 
-    kappa = numpyro.sample('kappa',dist.Uniform(kappa_true-3,kappa_true+3))
+    kappa = numpyro.deterministic('kappa', kappa_true) #numpyro.sample('kappa',dist.Uniform(kappa_true-3,kappa_true+3))
     [weights, weight_sigmas, vts, vt_sigmas] = jax_compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, T)
     
     N_F_exp = numpyro.deterministic('N_F_exp',jnp.sum(n_corr*vts))
 
     numpyro.factor('log_likelihood',jnp.sum(jnp.log(jnp.dot(weights,n_corr)))-N_F_exp)
 
+
 def sample_numpyro(samples, det_samples, pdraw, Ndraw, mbins, Tobs, thinning=100,
         num_warmup=10,
         num_samples=100,
-        num_chains=1,target_accept_prob=0.9,kappa=3.0,sigma_sd=5,mu_dim=None):
+        num_chains=1,target_accept_prob=0.9,kappa=3.0,sigma_sd=5,mu_dim=None,H0min=40,H0max=100):
     
     scale_mean,scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
     scale_mean,scale_sd, logm_bin_centers = jnp.asarray(scale_mean),jnp.asarray(scale_sd),jnp.asarray(logm_bin_centers)
 
     mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
+    
     RNG = jax.random.PRNGKey(0)
     MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)
+    
     kernel = NUTS(gp_spectral_siren_model_numpyro, target_accept_prob= target_accept_prob)
+    
     mcmc = MCMC(
         kernel,
         thinning=thinning,
@@ -295,7 +321,7 @@ def sample_numpyro(samples, det_samples, pdraw, Ndraw, mbins, Tobs, thinning=100
         num_chains=num_chains,
     )
 
-    mcmc.run(PRIOR_RNG,samples, det_samples, pdraw, Ndraw, scale_mean, scale_sd, logm_bin_centers, Tobs, mbins, kappa, sigma_sd, mu_dim)
+    mcmc.run(PRIOR_RNG, samples, det_samples, pdraw, Ndraw, scale_mean, scale_sd, logm_bin_centers, Tobs, mbins, kappa, sigma_sd, mu_dim, H0min, H0max)
     
     return mcmc.get_samples()
 
@@ -312,6 +338,7 @@ def gp_fixed_cosmo_model_numpyro(weights, vts, scale_mean, scale_sd, logm_bin_ce
     N_F_exp = numpyro.deterministic('N_F_exp',jnp.sum(n_corr*vts))
 
     numpyro.factor('log_likelihood',jnp.sum(jnp.log(jnp.dot(weights,n_corr)))-N_F_exp)
+
 
 def sample_numpyro_fixed_cosmo(samples, det_samples, pdraw, Ndraw, mbins, Tobs, thinning=100,
         num_warmup=10,

@@ -48,7 +48,7 @@ def read_posteriors_pesummary(event_list,nsamples):
         _posterior = pd.DataFrame()
         ff = read(event)
         samples_dict = ff.samples_dict
-        posterior_samples = samples_dict[key]
+        posterior_samples = samples_dict[key] if len(key)>0 else samples_dict
         for parameter in parameters:
             _posterior[parameter] = posterior_samples[parameter]
         posteriors.append(_posterior)
@@ -237,11 +237,14 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
             
         if m1m2_given_z_prior is not None:
             assert type(m1m2_given_z_prior) == dict
-            for i, prior_func in enumerate(m1m2_given_z_prior.values()):
-                assert callabe(prior_func) or prior_func is None
-                if prior_func is not None:
-                    pe_perior[i] = prior_func(posterior_samples[i,:,:])
-        gppop_metadata['m1m2_given_z_prior'] = pe_prior
+            for i, event in enumerate(event_list):
+                prior = m1m2_given_z_prior[event]
+                assert(callable(prior))
+                pe_prior[i] = prior(posterior_samples[i,:,:])
+                
+            gppop_metadata['m1m2_given_z_prior'] = pe_prior
+        else:
+            pe_prior = None
         
         inj_dataset = {}
         with h5py.File(injection_filename,'r') as hf:
@@ -261,7 +264,7 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
         gppop_metadata['total_generated'] = inj_dataset['total_generated']
         
         gp_inputs = parse_input(mbins,zbins,posterior_samples,
-                           m1m2_given_z_prior,inj_dataset,
+                           pe_prior,inj_dataset,
                            thresh,thresh_keys)
         
         gppop_metadata['posterior_weights'] = gp_inputs.weights
@@ -322,7 +325,10 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
                 injections = hf['gppop_metadata']['inj_dataset'][()]
                 thresh = hf['gppop_metadata']['thresh'][()]
                 keys = hf['gppop_metadata']['thresh_keys'][()]
-                keys = [k.decode('utf-8') for k in keys]
+                try:
+                    keys = [k.decode('utf-8') for k in keys] 
+                except AttributeError:
+                    keys = keys.decode('utf-8')
                 mbins = hf['gppop_metadata']['mbins'][()]
                 zbins = hf['gppop_metadata']['zbins'][()]
     
@@ -342,25 +348,25 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
             hyper_samples = np.concatenate((gp_output.lambda_m_samples, gp_output.lambda_z_samples, gp_output.sigma_samples, gp_output.mu_samples,gp_output.n_corr_samples),axis = 1)
             popsummary.set_hyperparameter_samples(hyper_samples,overwrite = overwrite, group = group)
                 
-            reweighted_pe_samples = np.zeros([pe_samples.shape[0], n_draw_pe, gp_output.N_samples, pe_samples.shape[-1]])
-            for i in range(pe_samples.shape[0]):
-                print(f"re-weighting {i}th event's pe samples using hyper-{group}")
-                reweighted_pe_samples[i,:,:,:] = gp_output.reweight_pe_samples(pe_samples[i], n_corr_sample=gp_output.n_corr_samples, m1m2z_prior=None if all(pe_prior[i]== 1.0) else pe_prior[i], size=n_draw_pe)
+#             reweighted_pe_samples = np.zeros([pe_samples.shape[0], n_draw_pe, gp_output.N_samples, pe_samples.shape[-1]])
+#             for i in range(pe_samples.shape[0]):
+#                 print(f"re-weighting {i}th event's pe samples using hyper-{group}")
+#                 reweighted_pe_samples[i,:,:,:] = gp_output.reweight_pe_samples(pe_samples[i], n_corr_sample=gp_output.n_corr_samples, m1m2z_prior=None if all(pe_prior[i]== 1.0) else pe_prior[i], size=n_draw_pe)
             
-            popsummary.set_reweighted_event_samples(reweighted_pe_samples,overwrite = overwrite, group = group)
-            reweight_pe_samples = [ ]
+#             popsummary.set_reweighted_event_samples(reweighted_pe_samples,overwrite = overwrite, group = group)
+#             reweight_pe_samples = [ ]
             
-            reweighted_injections = np.zeros([n_draw_inj,1, gp_output.N_samples, 9])
-            print(f'reweighting injections using hyper-{group}')
-            reweighted_injections[:,0,:,:] = gp_output.reweight_injections(injections, list(thresh), key = list(keys), include_spins = include_spins, n_corr_sample= gp_output.n_corr_samples, size=n_draw_inj)
-            popsummary.set_reweighted_injections(reweighted_injections, overwrite=overwrite, group=group)
-            reweight_injections = [ ]
+#             reweighted_injections = np.zeros([n_draw_inj,1, gp_output.N_samples, 9])
+#             print(f'reweighting injections using hyper-{group}')
+#             reweighted_injections[:,0,:,:] = gp_output.reweight_injections(injections, list(thresh), key = list(keys), include_spins = include_spins, n_corr_sample= gp_output.n_corr_samples, size=n_draw_inj)
+#             popsummary.set_reweighted_injections(reweighted_injections, overwrite=overwrite, group=group)
+#             reweight_injections = [ ]
             
-            print(f'generating fair population draws from the hyper-{group}')
-            fair_draws = np.zeros([n_draw_pred, gp_output.N_samples, 3])
-            fair_draws = gp_output.posterior_predictive_samples(n_corr_sample=gp_output.n_corr_samples, size=n_draw_pred)
-            popsummary.set_fair_population_draws(fair_draws, overwrite=overwrite, group=group)
-            fair_draws = [ ]
+#             print(f'generating fair population draws from the hyper-{group}')
+#             fair_draws = np.zeros([n_draw_pred, gp_output.N_samples, 3])
+#             fair_draws = gp_output.posterior_predictive_samples(n_corr_sample=gp_output.n_corr_samples, size=n_draw_pred)
+#             popsummary.set_fair_population_draws(fair_draws, overwrite=overwrite, group=group)
+#             fair_draws = [ ]
             
             if analysis_type == 'uncor':
                 print(f'computing marginal rate densities on grid for hyper-{group}')

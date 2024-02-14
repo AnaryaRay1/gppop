@@ -25,17 +25,20 @@ parser.add_argument('--jax_sampling', required = False, metavar = 'JAX_SAMPLING'
 parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=10)
 parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=None)
 parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
+parser.add_argument('--meta_file', required = False, metavar = 'path to popsummary metafile.', help = 'If provided, only output will be overwritten',type=bool,default=None)
 args= parser.parse_args()
 
 with open(args.config, "r") as stream:
     config = yaml.full_load(stream)
 
-
-io.create_metafile(np.array(config['mbins']),np.array(config['zbins']),config['meta_file'],config['nsamples'], 
+if args.meta_file is None:
+    io.create_metafile(np.array(config['mbins']),np.array(config['zbins']),config['meta_file'],config['nsamples'], 
                          config['injection_file'], config['injection_keys'], config['threshold'], config['threshold_keys'],
                          event_dict = config['event_dict'],
                          pe_summary_event_dict = config['pe_summary_event_dict'],
                          analysis_type = config['analysis_type'])
+else:
+    pass
 
 mbins, zbins = np.array(config['mbins']),np.array(config['zbins'])
 
@@ -119,7 +122,7 @@ with gp_model:
 
 trace.to_netcdf('gppop_posterior.nc')
 
-io.write_results_to_metafile(config['meta_file'],'gppop_posterior.nc','gppop_prior.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True)
+io.write_results_to_metafile(config['meta_file'] if args.meta_file is None else args.meta_file, 'gppop_posterior.nc','gppop_prior.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True)
 
 os.remove('gppop_posterior.nc')
 os.remove('gppop_prior.nc')

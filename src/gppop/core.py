@@ -515,7 +515,7 @@ class Post_Proc_Utils(Utils):
                 mass1 = np.append(mass1,m_array)
         return mass1,Rpm1
         
-    def get_Rpm2(self,n_corr,delta_logm1_array,m2_bins,zbins,log_bin_centers):
+    def get_Rpm2(self,n_corr,delta_logm1_array,m2_bins,zbins,log_bin_centers,m1_bounds = None):
         '''
         Function for computing marginal secondary mass population: dR/dm2
         (obtained by integrating dR/dm1dm2 over z and m1)
@@ -557,7 +557,10 @@ class Post_Proc_Utils(Utils):
             z_low = zbins[0]
             m_array = np.linspace(m2_low,m2_high,100)[:-1]
             idx_array = np.arange(len(log_bin_centers))
-            bin_idx = idx_array[(log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]<=z_high)&(log_bin_centers[:,2]>=z_low)]
+            if m1_bounds is None:
+                bin_idx = idx_array[(log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]<=z_high)&(log_bin_centers[:,2]>=z_low)]
+            else:
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_bounds[0]))&(log_bin_centers[:,0]<=np.log(m1_bounds[1]))&(log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]<=z_high)&(log_bin_centers[:,2]>=z_low)]
             rate_density_array = n_corr[bin_idx]
             delta_logm1s = delta_logm1_array[bin_idx]
             Rpm2 = np.append(Rpm2,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
@@ -712,6 +715,7 @@ class Post_Proc_Utils(Utils):
         dR/dq   : numpy.ndarray
                     1d array containing dR/dq evaluated at the supplied values of Qs
         '''
+        
         mmin = min(self.mbins) if mmin is None else mmin
         mmax = max(self.mbins) if mmax is None else mmax
         ones = np.ones_like(qs)[:,np.newaxis]
@@ -760,9 +764,13 @@ class Post_Proc_Utils(Utils):
         
         bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
                    (tril_edges[:,0,1]<=m2)&(tril_edges[:,1,1]>=m2)&(tril_edges[:,0,2]<=z)&(tril_edges[:,1,2]>=z)] for m1,m2,z in zip(m1s,m2s,zs)]
-        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
+        
+        sample_idx = np.array([(len(bi)>0)*(m1>=m2) for m1,m2,bi in zip(m1s,
+                                                                        m2s,bin_idx)])
+        bin_idx = np.array([bi[0] for m1,m2,
+                            bi in zip(m1s,m2s,bin_idx)  if len(bi)>0 and m1>=m2])
         n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
-        n_corr_at_idx[:,bin_idx] = n_corr[:,bin_idx]
+        n_corr_at_idx[:,sample_idx] = n_corr[:,bin_idx]
         p_m1m2z = n_corr_at_idx * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))/m1s/m2s
         return p_m1m2z
     

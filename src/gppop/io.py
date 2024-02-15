@@ -244,6 +244,7 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
                 
             gppop_metadata['m1m2_given_z_prior'] = pe_prior
         else:
+            gppop_metadata['m1m2_given_z_prior'] = pe_prior
             pe_prior = None
         
         inj_dataset = {}
@@ -348,25 +349,25 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
             hyper_samples = np.concatenate((gp_output.lambda_m_samples, gp_output.lambda_z_samples, gp_output.sigma_samples, gp_output.mu_samples,gp_output.n_corr_samples),axis = 1)
             popsummary.set_hyperparameter_samples(hyper_samples,overwrite = overwrite, group = group)
                 
-#             reweighted_pe_samples = np.zeros([pe_samples.shape[0], n_draw_pe, gp_output.N_samples, pe_samples.shape[-1]])
-#             for i in range(pe_samples.shape[0]):
-#                 print(f"re-weighting {i}th event's pe samples using hyper-{group}")
-#                 reweighted_pe_samples[i,:,:,:] = gp_output.reweight_pe_samples(pe_samples[i], n_corr_sample=gp_output.n_corr_samples, m1m2z_prior=None if all(pe_prior[i]== 1.0) else pe_prior[i], size=n_draw_pe)
+            reweighted_pe_samples = np.zeros([pe_samples.shape[0], n_draw_pe, gp_output.N_samples, pe_samples.shape[-1]])
+            for i in range(pe_samples.shape[0]):
+                print(f"re-weighting {i}th event's pe samples using hyper-{group}")
+                reweighted_pe_samples[i,:,:,:] = gp_output.reweight_pe_samples(pe_samples[i], n_corr_sample=gp_output.n_corr_samples, m1m2z_prior=None if all(pe_prior[i]== 1.0) else pe_prior[i], size=n_draw_pe)
             
-#             popsummary.set_reweighted_event_samples(reweighted_pe_samples,overwrite = overwrite, group = group)
-#             reweight_pe_samples = [ ]
+            popsummary.set_reweighted_event_samples(reweighted_pe_samples,overwrite = overwrite, group = group)
+            reweight_pe_samples = [ ]
             
-#             reweighted_injections = np.zeros([n_draw_inj,1, gp_output.N_samples, 9])
-#             print(f'reweighting injections using hyper-{group}')
-#             reweighted_injections[:,0,:,:] = gp_output.reweight_injections(injections, list(thresh), key = list(keys), include_spins = include_spins, n_corr_sample= gp_output.n_corr_samples, size=n_draw_inj)
-#             popsummary.set_reweighted_injections(reweighted_injections, overwrite=overwrite, group=group)
-#             reweight_injections = [ ]
+            reweighted_injections = np.zeros([n_draw_inj,1, gp_output.N_samples, 9])
+            print(f'reweighting injections using hyper-{group}')
+            reweighted_injections[:,0,:,:] = gp_output.reweight_injections(injections, list(thresh), key = list(keys), include_spins = include_spins, n_corr_sample= gp_output.n_corr_samples, size=n_draw_inj)
+            popsummary.set_reweighted_injections(reweighted_injections, overwrite=overwrite, group=group)
+            reweight_injections = [ ]
             
-#             print(f'generating fair population draws from the hyper-{group}')
-#             fair_draws = np.zeros([n_draw_pred, gp_output.N_samples, 3])
-#             fair_draws = gp_output.posterior_predictive_samples(n_corr_sample=gp_output.n_corr_samples, size=n_draw_pred)
-#             popsummary.set_fair_population_draws(fair_draws, overwrite=overwrite, group=group)
-#             fair_draws = [ ]
+            print(f'generating fair population draws from the hyper-{group}')
+            fair_draws = np.zeros([n_draw_pred, gp_output.N_samples, 3])
+            fair_draws = gp_output.posterior_predictive_samples(n_corr_sample=gp_output.n_corr_samples, size=n_draw_pred)
+            popsummary.set_fair_population_draws(fair_draws, overwrite=overwrite, group=group)
+            fair_draws = [ ]
             
             if analysis_type == 'uncor':
                 print(f'computing marginal rate densities on grid for hyper-{group}')
@@ -483,7 +484,7 @@ class output_data_products(Post_Proc_Utils):
         m1m2z_samples  : numpy.ndarray
                          array containing re-weighted posterior samples.
         '''
-        n_corr = self.n_corr_mean if n_corr_sample is None else n_corr_sample
+        n_corr = self.n_corr_mean[:,None] if n_corr_sample is None else n_corr_sample
         size = len(m1m2z_samples) if size is None else size
         z_samples = m1m2z_samples[:,2]
         dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
@@ -506,10 +507,11 @@ class output_data_products(Post_Proc_Utils):
         
         Parameters
         ----------
-        n_corr_sample      :: numpy.ndarray
-                              1d array containing rate densities in each bin,
-                              corresponding to which the population model for
-                              re-weighting is to be constructed. Default is None
+         n_corr_sample      :: numpy.ndarray
+                              2d array of shape (nsamples, nbins) containing 
+                              rate density samples for each bin, 
+                              corresponding to which the population models for
+                              re-weighting are to be constructed. Default is None
                               which implies the mean of the inferred rate density
                               samples i.e. the best fit population, will be used.
                               
@@ -528,17 +530,17 @@ class output_data_products(Post_Proc_Utils):
         z      : numpy.ndarray
                  1d array containing samples of redshift drawn from the binned population.                     
         '''
-        n_corr = self.n_corr_mean if n_corr_sample is None else n_corr_sample
+        n_corr = self.n_corr_mean[:,None] if n_corr_sample is None else n_corr_sample
         
-        m1s = np.random.uniform(min(self.mbins),max(self.mbins),size=size*50)
-        m2s = np.random.uniform(min(self.mbins),m1s,size=size*50)
-        zs = np.random.uniform(min(self.zbins),max(self.zbins),size=size*50)
+        m1s = np.random.uniform(min(self.mbins),max(self.mbins),size=size)
+        m2s = np.random.uniform(min(self.mbins),m1s,size=size)
+        zs = np.random.uniform(min(self.zbins),max(self.zbins),size=size)
         
         m1m2z_samples = np.array([m1s,m2s,zs]).T
-        p_m1m2z_pop = self.get_pm1m2z(n_corr_sample,m1s,
+        p_m1m2z_pop = self.get_pm1m2z(n_corr,m1s,
                                       m2s,zs,self.tril_edges())
         weights = p_m1m2z_pop/np.sum(p_m1m2z_pop,axis=1)[:,np.newaxis]
-        indices = np.array([np.random.choice(size*50,p=weights[i,:],size=size) for i in range(weights.shape[0])]).T
+        indices = np.array([np.random.choice(size,p=weights[i,:],size=size) for i in range(weights.shape[0])]).T
         
         return m1m2z_samples[indices,:]
     

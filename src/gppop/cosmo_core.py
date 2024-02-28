@@ -115,7 +115,7 @@ def generate_logM_bin_centers(mbins):
 
 
 @jit
-def compute_weight_single_ev(samples,mbins,H0=H0Planck,Om0=Om0Planck,kappa=3):
+def compute_weight_single_ev(samples, mbins, H0=H0Planck, Om0=Om0Planck, kappa=3):
     m1d_samples = samples[:,0]
     m2d_samples = samples[:,1]
     d_samples = samples[:,2]
@@ -173,7 +173,7 @@ def VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0Planck, Om0=Om0Planck, 
     m1s_samples = m1d_samples/(1+z_samples)
     m2s_samples = m2d_samples/(1+z_samples)
     
-    pz_pop = T*dV_of_z(z_samples,H0=H0,Om0=Om0)*((1.*u.Mpc**3).to(u.Gpc**3).value)*(1+z_samples)**(kappa-1)
+    pz_pop = T*dV_of_z(z_samples,H0=H0,Om0=Om0)*(1+z_samples)**(kappa-1)
     p_pop = pz_pop/m1s_samples/m2s_samples
     
     ddL_dz = ddL_of_z(z_samples,d_samples,H0=H0,Om0=Om0)
@@ -189,7 +189,7 @@ def VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0Planck, Om0=Om0Planck, 
  
     vt_means = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight),axis=0)/(Ndraw)
     
-    vt_vars = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight**2),axis=0)/(Ndraw**2)- vt_means**2/Ndraw
+    vt_vars = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight**2),axis=0)/(Ndraw**2) - vt_means**2/Ndraw
     
     return vt_means[jnp.tril_indices(nbins_m)], jnp.sqrt(vt_vars)[jnp.tril_indices(nbins_m)]
 
@@ -431,7 +431,9 @@ def make_gp_spectral_siren_model_pymc(samples, det_samples, pdraw, Ndraw, mbins,
     mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
 
     with pm.Model() as model:
-        H0 = pm.Uniform('H0', H0min, H0max)
+        logH0 = pm.Uniform('logH0', np.log(H0min), np.log(H0max))
+        H0 = pm.Deterministic('H0',at.exp(logH0))
+        
         kappa = pm.Uniform('kappa', 0, 15)
         Om0 = pm.Deterministic('Om0',at.as_tensor_variable(Om0Planck))
         

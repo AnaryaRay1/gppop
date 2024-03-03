@@ -209,6 +209,108 @@ def compute_gp_inputs(mbins):
     return scale_mean, scale_sd, logm_bin_centers
 
 
+## PYMC3 ##
+class ComputeWeightsVtsOp(at.Op):
+    itypes = [at.dtensor3, at.dmatrix, at.dvector, at.dscalar, at.dvector, at.dscalar, at.dscalar, at.dscalar, at.dscalar]
+    otypes = [at.dmatrix, at.dmatrix, at.dvector, at.dvector]
+
+    def make_node(self, samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs):
+        samples = at.as_tensor_variable(samples)
+        det_samples = at.as_tensor_variable(det_samples)
+        pdraw = at.as_tensor_variable(pdraw)
+        Ndraw = at.as_tensor_variable(Ndraw)
+        mbins = at.as_tensor_variable(mbins)
+        H0 = at.as_tensor_variable(H0)
+        Om0 = at.as_tensor_variable(Om0)
+        kappa = at.as_tensor_variable(kappa)
+        Tobs = at.as_tensor_variable(Tobs)
+
+        return ae.graph.basic.Apply(self, [samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs], [at.dmatrix(),at.dmatrix(),at.dvector(),at.dvector()])
+
+    def perform(self, node, inputs, outputs):
+        samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs = inputs
+        
+        out = jax_compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs)
+        
+        outputs[0][0] = np.asarray(out[0])
+        outputs[1][0] = np.asarray(out[1])
+        outputs[2][0] = np.asarray(out[2])
+        outputs[3][0] = np.asarray(out[3])
+
+    def grad(self, inputs, gradients):
+        samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs = inputs
+        grad_samples = at.zeros_like(samples)
+        grad_det_samples = at.zeros_like(det_samples)
+        grad_pdraw = at.zeros_like(pdraw)
+        grad_Ndraw = at.zeros_like(Ndraw)
+        grad_mbins = at.zeros_like(mbins)
+        grad_H0 = at.zeros_like(H0)
+        grad_Om0 = at.zeros_like(Om0)
+        grad_kappa = at.zeros_like(kappa)
+        grad_Tobs = at.zeros_like(Tobs)
+        return [grad_samples, grad_det_samples, grad_pdraw, grad_Ndraw, grad_mbins, grad_H0, grad_Om0, grad_kappa, grad_Tobs]
+
+
+compute_weights_vts_op = ComputeWeightsVtsOp()
+
+
+@jax_funcify.register(ComputeWeightsVtsOp)
+def jax_funcify_compute_weights_vts_op(op,**kwargs):
+    def compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs):
+          return jax_compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs)
+    return compute_weights_vts_op
+    
+    
+def make_gp_spectral_siren_model_pymc(samples, det_samples, pdraw, Ndraw, mbins, Tobs, mu_dim=None, H0min=20, H0max=140, kappamin=-10, kappamax=10):
+    
+    samples = np.asarray(samples)
+    det_samples = np.asarray(det_samples)
+    pdraw = np.asarray(pdraw)
+    mbins = np.asarray(mbins)
+    
+    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
+    scale_mean, scale_sd, logm_bin_centers = np.asarray(scale_mean), np.asarray(scale_sd), np.asarray(logm_bin_centers)
+    
+    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
+    
+    hmin = H0min/100
+    hmax = H0max/100
+
+    with pm.Model() as model:
+        h = pm.Uniform('h', hmin, hmax)
+        H0 = 100*h
+        
+        kappa = pm.Uniform('kappa', kappamin, kappamax)
+        Om0 = pm.Deterministic('Om0', at.as_tensor_variable(Om0Planck))
+        
+        mu = pm.Normal('mu', mu=0, sigma=5, shape=mu_dim)
+        sigma = pm.HalfNormal('sigma', sigma=1)
+        length_scale = pm.Lognormal('length_scale', mu=scale_mean, sigma=scale_sd)
+        
+        covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2, ls=length_scale)
+        gp = pm.gp.Latent(cov_func=covariance)
+        
+        logn_corr = gp.prior('logn_corr', X=logm_bin_centers)
+        logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+        n_corr = pm.Deterministic('n_corr', at.exp(logn_tot))
+        
+        [weights, weight_sigmas, vts, vt_sigmas] = compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs)
+        
+        N_F_exp = pm.Deterministic('N_F_exp', at.sum(n_corr*vts))
+        
+        log_l = pm.Potential('log_l', at.sum(at.log(at.dot(weights,n_corr))) - N_F_exp)
+        
+        return model
+
+
+def sample_pymc(model, njobs=1, ndraw=1000, ntune=1000, target_accept=0.7):
+    with model:
+        trace = pm.sampling_jax.sample_numpyro_nuts(draws=ndraw,tune=ntune,chains=njobs,
+                                                    target_accept=target_accept)
+        return trace
+
+
+## Numpyro ##
 @jit
 def kernel_RBF(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
     deltaXsq = jnp.sum(jnp.power((X[jnp.newaxis,:,:]-X[:,jnp.newaxis,:])/length, 2.0),axis=-1)
@@ -260,7 +362,6 @@ def kernel_matern_int(X, Z, ms, var, length, noise, jitter=1.0e-6, include_noise
     return k
 
 
-## Numpyro ##
 def gp_spectral_siren_model_numpyro(samples, det_samples, pdraw, Ndraw, mbins, Tobs, mu_dim, H0min, H0max, scale_mean, scale_sd, logm_bin_centers):
     
     mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
@@ -316,103 +417,3 @@ def sample_numpyro(samples, det_samples, pdraw, Ndraw, mbins, Tobs, mu_dim=None,
     mcmc.run(PRIOR_RNG, samples, det_samples, pdraw, Ndraw, mbins, Tobs, mu_dim, H0min, H0max, scale_mean, scale_sd, logm_bin_centers)
     
     return mcmc.get_samples()
-
-
-## PYMC3 ##
-class ComputeWeightsVtsOp(at.Op):
-    itypes = [at.dtensor3, at.dmatrix, at.dvector, at.dscalar, at.dvector, at.dscalar, at.dscalar, at.dscalar, at.dscalar]
-    otypes = [at.dmatrix, at.dmatrix, at.dvector, at.dvector]
-
-    def make_node(self, samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs):
-        samples = at.as_tensor_variable(samples)
-        det_samples = at.as_tensor_variable(det_samples)
-        pdraw = at.as_tensor_variable(pdraw)
-        Ndraw = at.as_tensor_variable(Ndraw)
-        mbins = at.as_tensor_variable(mbins)
-        H0 = at.as_tensor_variable(H0)
-        Om0 = at.as_tensor_variable(Om0)
-        kappa = at.as_tensor_variable(kappa)
-        Tobs = at.as_tensor_variable(Tobs)
-
-        return ae.graph.basic.Apply(self, [samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs], [at.dmatrix(),at.dmatrix(),at.dvector(),at.dvector()])
-
-    def perform(self, node, inputs, outputs):
-        samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs = inputs
-        
-        out = jax_compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs)
-        
-        outputs[0][0] = np.asarray(out[0])
-        outputs[1][0] = np.asarray(out[1])
-        outputs[2][0] = np.asarray(out[2])
-        outputs[3][0] = np.asarray(out[3])
-
-    def grad(self, inputs, gradients):
-        samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs = inputs
-        grad_samples = at.zeros_like(samples)
-        grad_det_samples = at.zeros_like(det_samples)
-        grad_pdraw = at.zeros_like(pdraw)
-        grad_Ndraw = at.zeros_like(Ndraw)
-        grad_mbins = at.zeros_like(mbins)
-        grad_H0 = at.zeros_like(H0)
-        grad_Om0 = at.zeros_like(Om0)
-        grad_kappa = at.zeros_like(kappa)
-        grad_Tobs = at.zeros_like(Tobs)
-        return [grad_samples, grad_det_samples, grad_pdraw, grad_Ndraw, grad_mbins, grad_H0, grad_Om0, grad_kappa, grad_Tobs]
-
-
-compute_weights_vts_op = ComputeWeightsVtsOp()
-
-
-@jax_funcify.register(ComputeWeightsVtsOp)
-def jax_funcify_compute_weights_vts_op(op,**kwargs):
-    def compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs):
-          return jax_compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs)
-    return compute_weights_vts_op
-    
-    
-def make_gp_spectral_siren_model_pymc(samples, det_samples, pdraw, Ndraw, mbins, Tobs, mu_dim=None, H0min=20, H0max=140):
-    
-    samples = np.asarray(samples)
-    det_samples = np.asarray(det_samples)
-    pdraw = np.asarray(pdraw)
-    mbins = np.asarray(mbins)
-    
-    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
-    scale_mean, scale_sd, logm_bin_centers = np.asarray(scale_mean), np.asarray(scale_sd), np.asarray(logm_bin_centers)
-    
-    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
-    
-    hmin = H0min/100
-    hmax = H0max/100
-
-    with pm.Model() as model:
-        h = pm.Uniform('h', hmin, hmax)
-        H0 = 100*h
-        
-        kappa = pm.Uniform('kappa', 0, 15)
-        Om0 = pm.Deterministic('Om0', at.as_tensor_variable(Om0Planck))
-        
-        mu = pm.Normal('mu', mu=0, sigma=5, shape=mu_dim)
-        sigma = pm.HalfNormal('sigma', sigma=1)
-        length_scale = pm.Lognormal('length_scale', mu=scale_mean, sigma=scale_sd)
-        
-        covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2, ls=length_scale)
-        gp = pm.gp.Latent(cov_func=covariance)
-        
-        logn_corr = gp.prior('logn_corr', X=logm_bin_centers)
-        logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
-        n_corr = pm.Deterministic('n_corr', at.exp(logn_tot))
-        
-        [weights, weight_sigmas, vts, vt_sigmas] = compute_weights_vts_op(samples, det_samples, pdraw, Ndraw, mbins, H0, Om0, kappa, Tobs)
-        
-        N_F_exp = pm.Deterministic('N_F_exp', at.sum(n_corr*vts))
-        
-        log_l = pm.Potential('log_l', at.sum(at.log(at.dot(weights,n_corr))) - N_F_exp)
-        
-        return model
-
-def sample_pymc(model, njobs=1, ndraw=1000, ntune=1000, target_accept=0.7):
-    with model:
-        trace = pm.sampling_jax.sample_numpyro_nuts(draws=ndraw,tune=ntune,chains=njobs,
-                                                    target_accept=target_accept)
-        return trace

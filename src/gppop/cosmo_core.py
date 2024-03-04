@@ -49,7 +49,7 @@ speed_of_light = constants.c.to('km/s').value
 zgrid = np.expm1(np.linspace(np.log(1), np.log(zMax+1), 5000))
 
 rs = []
-Om0grid = jnp.linspace(Om0Planck-0.1,Om0Planck+0.1,50)
+Om0grid = jnp.linspace(Om0Planck-0.15,Om0Planck+0.15,100)
 
 for Om0 in tqdm.tqdm(Om0grid):
     cosmo = FlatLambdaCDM(H0=H0Planck,Om0=Om0)
@@ -173,7 +173,6 @@ def VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0Planck, Om0=Om0Planck, 
     m2_indices = jnp.clip(jnp.searchsorted(mbins, m2s_samples, side='right')- 1, a_min=0, a_max=nbins_m - 1)
  
     vt_means = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight),axis=0)/(Ndraw)
-    
     vt_vars = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight**2),axis=0)/(Ndraw**2) - vt_means**2/Ndraw
     
     return vt_means[jnp.tril_indices(nbins_m)], jnp.sqrt(vt_vars)[jnp.tril_indices(nbins_m)]
@@ -309,111 +308,3 @@ def sample_pymc(model, njobs=1, ndraw=1000, ntune=1000, target_accept=0.7):
                                                     target_accept=target_accept)
         return trace
 
-
-## Numpyro ##
-@jit
-def kernel_RBF(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
-    deltaXsq = jnp.sum(jnp.power((X[jnp.newaxis,:,:]-X[:,jnp.newaxis,:])/length, 2.0),axis=-1)
-
-    k = var * jnp.exp(-0.5 * deltaXsq)
-    if include_noise:
-        k += (noise + jitter) * jnp.eye(X.shape[0])
-    return k
-
-
-@jit
-def kernel_matern(X, Z, alpha, var, length, noise, jitter=1.0e-6, include_noise=True):
-    deltaX = jnp.sqrt(2.*alpha*(jnp.sum(jnp.power((X[jnp.newaxis,:,:]-X[:,jnp.newaxis,:])/length, 2.0),axis=-1)+1e-12))
-
-    k = var * (1./(2**(alpha-1.)*jsp.special.gamma(alpha)))* jnp.power(deltaX,alpha)*jnp.exp(log_k_vec(alpha,deltaX.flatten()).reshape(len(deltaX),len(deltaX)))
-    k = k.at[jnp.diag_indices(len(deltaX),2)].set(var)
-    if include_noise:
-        k += (noise + jitter) * jnp.eye(X.shape[0])
-    return k
-
-
-@jit
-def kernel_matern_3_by_2(X, Z, var, length, noise, jitter=1.0e-6, include_noise=True):
-    m = 0
-    alpha = m+1./2.
-    deltaX = jnp.sqrt(2.*alpha*(jnp.sum(jnp.power((X[jnp.newaxis,:,:]-X[:,jnp.newaxis,:])/length, 2.0),axis=-1)+1e-12))
-
-    k = var * jnp.exp(-deltaX) * (1.+deltaX)
-    if include_noise:
-        k += (noise + jitter) * jnp.eye(X.shape[0])
-    return k
-
-
-@jit
-def kernel_matern_int(X, Z, ms, var, length, noise, jitter=1.0e-6, include_noise=True):
-    m = len(ms)
-    alpha = m+1./2.
-    deltaX = jnp.sqrt(2.*alpha*(jnp.sum(jnp.power((X[jnp.newaxis,:,:]-X[:,jnp.newaxis,:])/length, 2.0),axis=-1)+1e-12))
-    
-    ar=jnp.arange(m)+1
-    i = ar[:,jnp.newaxis,jnp.newaxis]
-    coeffs = jsp.special.gamma(m+1)/jsp.special.gamma(m-1)/jsp.special.gamma(i)
-    
-    power = m-i
-    k = var * jnp.exp(-deltaX) *(jsp.special.gamma(m+1)/jsp.special.gamma(2*m+1))*jnp.sum(coeffs*jnp.power(2.*deltaX[jnp.newaxis,:,:],power),axis=0)
-
-    if include_noise:
-        k += (noise + jitter) * jnp.eye(X.shape[0])
-    return k
-
-
-def gp_spectral_siren_model_numpyro(samples, det_samples, p_draw, Ndraw, mbins, Tobs, mu_dim, H0min, H0max, scale_mean, scale_sd, logm_bin_centers):
-    
-    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
-    
-    hmin = H0min/100
-    hmax = H0max/100
-    
-    h = numpyro.sample("h", dist.Uniform(H0min, H0max))
-    H0 = 100*h
-    
-    kappa = numpyro.sample('kappa',dist.Uniform(0, 15))
-    Om0 = numpyro.deterministic('Om0', Om0Planck)
-    
-    mu = numpyro.sample('mu', dist.Normal(0, 5), sample_shape=(mu_dim,))
-    sigma = numpyro.sample('sigma', dist.HalfNormal(1))
-    length_scale = numpyro.sample('length_scale', dist.LogNormal(scale_mean, scale_sd))
-    
-    cov = kernel_RBF(logm_bin_centers, logm_bin_centers, jnp.power(sigma, 2.0), length_scale, 0.0)
-    
-    logn_tot = numpyro.sample('logn_tot', dist.MultivariateNormal(loc=mu, covariance_matrix=cov))
-    n_corr = numpyro.deterministic('n_corr', jnp.exp(logn_tot))
-    
-    [weights, weight_sigmas, vts, vt_sigmas] = jax_compute_weights_vts_op(samples, det_samples, p_draw, Ndraw, mbins, H0, Om0, kappa, Tobs)
-    
-    N_F_exp = numpyro.deterministic('N_F_exp',jnp.sum(n_corr*vts))
-    
-    numpyro.factor('log_likelihood',jnp.sum(jnp.log(jnp.dot(weights,n_corr)))-N_F_exp)
-
-
-def sample_numpyro(samples, det_samples, p_draw, Ndraw, mbins, Tobs, mu_dim=None, H0min=20, H0max=140,
-                   thinning=1,
-                   num_warmup=1000,
-                   num_samples=1000,
-                   num_chains=1,
-                   target_accept_prob=0.7):
-    
-    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
-    scale_mean, scale_sd, logm_bin_centers = jnp.asarray(scale_mean), jnp.asarray(scale_sd), jnp.asarray(logm_bin_centers)
-
-    RNG = jax.random.PRNGKey(0)
-    MCMC_RNG, PRIOR_RNG, _RNG = jax.random.split(RNG, num=3)
-    
-    kernel = NUTS(gp_spectral_siren_model_numpyro, target_accept_prob= target_accept_prob)
-    
-    mcmc = MCMC(
-        kernel,
-        thinning=thinning,
-        num_warmup=num_warmup,
-        num_samples=num_samples,
-        num_chains=num_chains,
-    )
-
-    mcmc.run(PRIOR_RNG, samples, det_samples, p_draw, Ndraw, mbins, Tobs, mu_dim, H0min, H0max, scale_mean, scale_sd, logm_bin_centers)
-    
-    return mcmc.get_samples()

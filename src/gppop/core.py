@@ -156,9 +156,9 @@ class Utils():
         pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples)
         ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
         if m1m2_given_z_prior is None:
-            pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+            pz_PE = (1+z_samples)**2 * Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples) # default PE prior -uniform in source frame
         else : 
-            pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
+            pz_PE = m1m2_given_z_prior * Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples) 
         pz_weight = pz_pop/pz_PE
         indices = zip(m1_indices,m2_indices,z_indices)
         for i,inds in enumerate(indices):

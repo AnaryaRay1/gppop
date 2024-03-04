@@ -191,30 +191,13 @@ def compute_gp_inputs(mbins):
     scale_min = jnp.log(jnp.min(dist_array[dist_array!=0.]))
     scale_max = jnp.log(jnp.max(dist_array))
 
-    scale_mean = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
+    scale_mean = 0.5*(scale_min + scale_max)
     scale_sd = (scale_max - scale_min)/4
 
     return scale_mean, scale_sd, logm_bin_centers
 
 
-def make_gp_spectral_siren_model_pymc(samples, det_samples, p_draw, Ndraw, mbins, Tobs, mu_dim=None, H0min=20, H0max=140, kappamin=-10, kappamax=10):
-    
-    samples = np.asarray(samples)
-    det_samples = np.asarray(det_samples)
-    p_draw = np.asarray(p_draw)
-    mbins = np.asarray(mbins)
-    
-    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
-    scale_mean, scale_sd, logm_bin_centers = np.asarray(scale_mean), np.asarray(scale_sd), np.asarray(logm_bin_centers)
-    
-    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
-    
-    hmin = H0min/100
-    hmax = H0max/100
-    
-    H0grid = jnp.linspace(H0min,H0max,50)
-    kappagrid = jnp.linspace(kappamin,kappamax,50)
-    
+def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, kappagrid):
     nbins_m = int(len(mbins)*(len(mbins)-1)/2)
     bingrid = jnp.arange(nbins_m)
     
@@ -230,6 +213,47 @@ def make_gp_spectral_siren_model_pymc(samples, det_samples, p_draw, Ndraw, mbins
 
     VT_means = jnp.array(VT_means).reshape(len(H0grid),len(kappagrid),len(bingrid))
     VT_sigmas = jnp.array(VT_sigmas).reshape(len(H0grid),len(kappagrid),len(bingrid))
+
+    weights_means = []
+    weights_sigmas = []
+
+    for i in tqdm(range(len(event_grid))):
+        for k in range(len(H0grid)):
+            for j in range(len(kappagrid)):
+                weight_mean, weight_sigma = compute_weight_single_ev(samples[i], mbins, H0=H0grid[k], Om0=Om0Planck, kappa=kappagrid[j])
+                weights_means.append(weight_mean)
+                weights_sigmas.append(weight_sigma)
+
+    weights_means = jnp.array(weights_means).reshape(len(event_grid),len(H0grid),len(kappagrid),len(bingrid))
+    weights_sigmas = jnp.array(weights_sigmas).reshape(len(event_grid),len(H0grid),len(kappagrid),len(bingrid))
+
+    return weights_means, weights_sigmas, VT_means, VT_sigmas
+
+def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, mbins, mu_dim=None):
+    
+    weights_means = np.asarray(weights_means)
+    weights_sigmas = np.asarray(weights_sigmas)
+    VT_means = np.asarray(VT_means)
+    VT_sigmas = np.asarray(VT_sigmas)
+    
+    H0grid = np.asarray(H0grid)
+    kappagrid = np.asarray(kappagrid)
+
+    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
+    scale_mean, scale_sd, logm_bin_centers = np.asarray(scale_mean), np.asarray(scale_sd), np.asarray(logm_bin_centers)
+    
+    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
+    
+    hmin = H0grid[0]/100
+    hmax = H0grid[-1]/100
+    
+    kappamin = kappagrid[0]
+    kappamax = kappagrid[-1]
+    
+    nbins_m = int(len(mbins)*(len(mbins)-1)/2)
+    bingrid = jnp.arange(nbins_m)
+    event_grid = jnp.arange(weights_means.shape[0])
+    print(event_grid)
 
     limits_VT = [(H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
 
@@ -247,19 +271,6 @@ def make_gp_spectral_siren_model_pymc(samples, det_samples, p_draw, Ndraw, mbins
 
     def VT_numerical_grid(H0,kappa,bingrid):
         return VT_means_H0kappa(H0,kappa,bingrid), VT_sigmas_H0kappa(H0,kappa,bingrid)
-
-    weights_means = []
-    weights_sigmas = []
-
-    for i in tqdm(range(len(event_grid))):
-        for k in range(len(H0grid)):
-            for j in range(len(kappagrid)):
-                weight_mean, weight_sigma = compute_weight_single_ev(samples[i], mbins, H0=H0grid[k], Om0=Om0Planck, kappa=kappagrid[j])
-                weights_means.append(weight_mean)
-                weights_sigmas.append(weight_sigma)
-
-    weights_means = jnp.array(weights_means).reshape(len(event_grid),len(H0grid),len(kappagrid),len(bingrid))
-    weights_sigmas = jnp.array(weights_sigmas).reshape(len(event_grid),len(H0grid),len(kappagrid),len(bingrid))
 
     limits_weights = [(event_grid[0], event_grid[-1]), (H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
 

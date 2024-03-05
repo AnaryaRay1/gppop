@@ -477,7 +477,7 @@ class output_data_products(Post_Proc_Utils):
         m1m2z_samples  : numpy.ndarray
                          array containing re-weighted posterior samples.
         '''
-        n_corr = self.n_corr_mean if n_corr_sample is None else n_corr_sample
+        n_corr = self.n_corr_samp if n_corr_sample is None else n_corr_sample
         size = len(m1m2z_samples) if size is None else size
         z_samples = m1m2z_samples[:,2]
         dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
@@ -522,15 +522,15 @@ class output_data_products(Post_Proc_Utils):
         z      : numpy.ndarray
                  1d array containing samples of redshift drawn from the binned population.                     
         '''
-        n_corr = self.n_corr_mean if n_corr_sample is None else n_corr_sample
+        n_corr = self.n_corr_samples if n_corr_sample is None else n_corr_sample
         
         m1s = np.random.uniform(min(self.mbins),max(self.mbins),size=size*50)
         m2s = np.random.uniform(min(self.mbins),m1s,size=size*50)
         zs = np.random.uniform(min(self.zbins),max(self.zbins),size=size*50)
         
         m1m2z_samples = np.array([m1s,m2s,zs]).T
-        p_m1m2z_pop = self.get_pm1m2z(n_corr_sample,m1s,
-                                      m2s,zs,self.tril_edges())
+        p_m1m2z_pop = np.mean(self.get_pm1m2z(n_corr_sample,m1s,
+                                      m2s,zs,self.tril_edges()),axis=0)
         weights = p_m1m2z_pop/np.sum(p_m1m2z_pop,axis=1)[:,np.newaxis]
         indices = np.array([np.random.choice(size*50,p=weights[i,:],size=size) for i in range(weights.shape[0])]).T
         

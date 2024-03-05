@@ -137,8 +137,8 @@ def compute_weight_single_ev(samples, mbins, H0=H0Planck, Om0=Om0Planck, kappa=3
     
     weight = p_pop/d_samples**2/jac
     
-    m1_indices = jnp.clip(jnp.searchsorted(mbins, m1s_samples, side='right')- 1, a_min=0, a_max=nbins_m - 1)
-    m2_indices = jnp.clip(jnp.searchsorted(mbins, m2s_samples, side='right')- 1, a_min=0, a_max=nbins_m - 1)
+    m1_indices = jnp.clip(jnp.searchsorted(mbins, m1s_samples, side='right') - 1, a_min=0, a_max=nbins_m - 1)
+    m2_indices = jnp.clip(jnp.searchsorted(mbins, m2s_samples, side='right') - 1, a_min=0, a_max=nbins_m - 1)
  
     weight_means = jnp.sum(weights.at[sindices,m1_indices,m2_indices].set(weight),axis=0)/nsamples    
     weight_vars = jnp.sum(weights.at[sindices,m1_indices,m2_indices].set(weight**2),axis=0)/nsamples**2 - weight_means**2/nsamples
@@ -169,8 +169,8 @@ def VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0Planck, Om0=Om0Planck, 
 
     weight = mixture_weights*p_pop/p_draw/jac
     
-    m1_indices = jnp.clip(jnp.searchsorted(mbins, m1s_samples, side='right')- 1, a_min=0, a_max=nbins_m - 1)
-    m2_indices = jnp.clip(jnp.searchsorted(mbins, m2s_samples, side='right')- 1, a_min=0, a_max=nbins_m - 1)
+    m1_indices = jnp.clip(jnp.searchsorted(mbins, m1s_samples, side='right') - 1, a_min=0, a_max=nbins_m - 1)
+    m2_indices = jnp.clip(jnp.searchsorted(mbins, m2s_samples, side='right') - 1, a_min=0, a_max=nbins_m - 1)
  
     vt_means = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight),axis=0)/(Ndraw)
     vt_vars = jnp.sum(vts.at[sindices,m1_indices,m2_indices].set(weight**2),axis=0)/(Ndraw**2) - vt_means**2/Ndraw
@@ -229,7 +229,7 @@ def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0g
 
     return weights_means, weights_sigmas, VT_means, VT_sigmas
 
-def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, mbins, mu_dim=None):
+def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, mbins, mu_std=1, mu_dim=None):
     
     weights_means = np.asarray(weights_means)
     weights_sigmas = np.asarray(weights_sigmas)
@@ -371,7 +371,7 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
         kappa = pm.Uniform('kappa', kappamin, kappamax)
         Om0 = pm.Deterministic('Om0', at.as_tensor_variable(Om0Planck))
         
-        mu = pm.Normal('mu', mu=0, sigma=5, shape=mu_dim)
+        mu = pm.Normal('mu', mu=0, sigma=mu_std, shape=mu_dim)
         sigma = pm.HalfNormal('sigma', sigma=1)
         length_scale = pm.Lognormal('length_scale', mu=scale_mean, sigma=scale_sd)
         

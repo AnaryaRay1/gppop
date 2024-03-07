@@ -115,7 +115,7 @@ def generate_logM_bin_centers(mbins):
 
 
 @jit
-def compute_weight_single_ev(samples, mbins, H0=H0Planck, Om0=Om0Planck, kappa=3):
+def compute_weight_single_ev(samples, p_pe, mbins, H0=H0Planck, Om0=Om0Planck, kappa=3):
     m1d_samples = samples[:,0]
     m2d_samples = samples[:,1]
     d_samples = samples[:,2]
@@ -135,7 +135,7 @@ def compute_weight_single_ev(samples, mbins, H0=H0Planck, Om0=Om0Planck, kappa=3
     ddL_dz = ddL_of_z(z_samples,d_samples,H0=H0,Om0=Om0)
     jac = (1+z_samples)**2 *  ddL_dz
     
-    weight = p_pop/d_samples**2/jac
+    weight = p_pop/p_pe/jac
     
     m1_indices = jnp.clip(jnp.searchsorted(mbins, m1s_samples, side='right') - 1, a_min=0, a_max=nbins_m - 1)
     m2_indices = jnp.clip(jnp.searchsorted(mbins, m2s_samples, side='right') - 1, a_min=0, a_max=nbins_m - 1)
@@ -197,7 +197,9 @@ def compute_gp_inputs(mbins):
     return scale_mean, scale_sd, logm_bin_centers
 
 
-def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, kappagrid):
+def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, kappagrid, p_pe=None):
+    if p_pe is None:
+        p_pe = samples[:,:,2]**2
     nbins_m = int(len(mbins)*(len(mbins)-1)/2)
     bingrid = jnp.arange(nbins_m)
     
@@ -220,7 +222,7 @@ def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0g
     for i in tqdm(range(len(event_grid))):
         for k in range(len(H0grid)):
             for j in range(len(kappagrid)):
-                weight_mean, weight_sigma = compute_weight_single_ev(samples[i], mbins, H0=H0grid[k], Om0=Om0Planck, kappa=kappagrid[j])
+                weight_mean, weight_sigma = compute_weight_single_ev(samples[i], p_pe[i], mbins, H0=H0grid[k], Om0=Om0Planck, kappa=kappagrid[j])
                 weights_means.append(weight_mean)
                 weights_sigmas.append(weight_sigma)
 

@@ -231,6 +231,30 @@ def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0g
 
     return weights_means, weights_sigmas, VT_means, VT_sigmas
 
+
+def setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, bingrid, event_grid):    
+    limits_VT = [(H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
+
+    VT_means_grid = CartesianGrid(limits_VT, VT_means, mode='nearest')
+    VT_sigmas_grid = CartesianGrid(limits_VT, VT_sigmas, mode='nearest')
+
+    VT_means_H0kappa = jit(vmap(VT_means_grid, in_axes=(None,None,0), out_axes=0))
+    VT_sigmas_H0kappa = jit(vmap(VT_sigmas_grid, in_axes=(None,None,0), out_axes=0))
+
+    limits_weights = [(event_grid[0], event_grid[-1]), (H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
+
+    weights_means_grid = CartesianGrid(limits_weights, weights_means, mode='nearest')
+    weights_sigmas_grid = CartesianGrid(limits_weights, weights_sigmas, mode='nearest')
+
+    weights_means_H0kappa = jit(vmap(weights_means_grid, in_axes=(None,None,None,0), out_axes=0))
+    weights_means_eventH0kappa = jit(vmap(weights_means_H0kappa, in_axes=(0,None,None,None), out_axes=0))
+
+    weights_sigmas_H0kappa = jit(vmap(weights_sigmas_grid, in_axes=(None,None,None,0), out_axes=0))
+    weights_sigmas_eventH0kappa = jit(vmap(weights_sigmas_H0kappa, in_axes=(0,None,None,None), out_axes=0))
+    
+    return VT_means_H0kappa, VT_sigmas_H0kappa, weights_means_eventH0kappa, weights_sigmas_eventH0kappa
+
+
 def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, mbins, mu_std=1, mu_dim=None):
     
     weights_means = np.asarray(weights_means)
@@ -240,56 +264,18 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
     
     H0grid = np.asarray(H0grid)
     kappagrid = np.asarray(kappagrid)
-
-    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
-    scale_mean, scale_sd, logm_bin_centers = np.asarray(scale_mean), np.asarray(scale_sd), np.asarray(logm_bin_centers)
-    
-    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
-    
-    hmin = H0grid[0]/100
-    hmax = H0grid[-1]/100
-    
-    kappamin = kappagrid[0]
-    kappamax = kappagrid[-1]
     
     nbins_m = int(len(mbins)*(len(mbins)-1)/2)
     bingrid = jnp.arange(nbins_m)
     event_grid = jnp.arange(weights_means.shape[0])
-    print(event_grid)
-
-    limits_VT = [(H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
-
-    VT_means_grid = CartesianGrid(limits_VT, VT_means, mode='nearest')
-    VT_sigmas_grid = CartesianGrid(limits_VT, VT_sigmas, mode='nearest')
-
-    def VT_means_(H0,kappa,mbin):
-        return VT_means_grid(H0,kappa,mbin)
-
-    def VT_sigmas_(H0,kappa,mbin):
-        return VT_sigmas_grid(H0,kappa,mbin)
-
-    VT_means_H0kappa = jit(vmap(VT_means_, in_axes=(None,None,0), out_axes=0))
-    VT_sigmas_H0kappa = jit(vmap(VT_sigmas_, in_axes=(None,None,0), out_axes=0))
-
+    
+    bingrid = np.asarray(bingrid)
+    event_grid = np.asarray(event_grid)
+    
+    VT_means_H0kappa, VT_sigmas_H0kappa, weights_means_eventH0kappa, weights_sigmas_eventH0kappa = setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, bingrid, event_grid)
+   
     def VT_numerical_grid(H0,kappa,bingrid):
         return VT_means_H0kappa(H0,kappa,bingrid), VT_sigmas_H0kappa(H0,kappa,bingrid)
-
-    limits_weights = [(event_grid[0], event_grid[-1]), (H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
-
-    weights_means_grid = CartesianGrid(limits_weights, weights_means, mode='nearest')
-    weights_sigmas_grid = CartesianGrid(limits_weights, weights_sigmas, mode='nearest')
-
-    def weights_means_(event,H0,kappa,mbin):
-        return weights_means_grid(event,H0,kappa,mbin)
-
-    def weights_sigmas_(event,H0,kappa,mbin):
-        return weights_sigmas_grid(event,H0,kappa,mbin)
-
-    weights_means_H0kappa = jit(vmap(weights_means_, in_axes=(None,None,None,0), out_axes=0))
-    weights_means_eventH0kappa = jit(vmap(weights_means_H0kappa, in_axes=(0,None,None,None), out_axes=0))
-
-    weights_sigmas_H0kappa = jit(vmap(weights_sigmas_, in_axes=(None,None,None,0), out_axes=0))
-    weights_sigmas_eventH0kappa = jit(vmap(weights_sigmas_H0kappa, in_axes=(0,None,None,None), out_axes=0))
 
     def weights_numerical_grid(event_grid,H0,kappa,bingrid):
         return [weights_means_eventH0kappa(event_grid,H0,kappa,bingrid), weights_sigmas_eventH0kappa(event_grid,H0,kappa,bingrid)]
@@ -346,7 +332,7 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
             grad_H0 = at.zeros_like(H0)
             grad_kappa = at.zeros_like(kappa)
             grad_bingrid = at.zeros_like(bingrid)
-            return [ grad_H0, grad_kappa, grad_bingrid]
+            return [grad_H0, grad_kappa, grad_bingrid]
 
     compute_weights_op = ComputeWeightsOp()
     compute_VTs_op = ComputeVTsOp()
@@ -362,9 +348,17 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
         def compute_VTs_op(H0, kappa, bingrid):
               return VT_numerical_grid(H0, kappa, bingrid)
         return compute_VTs_op
-
-    bingrid = np.asarray(bingrid)
-    event_grid = np.asarray(event_grid)
+    
+    scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
+    scale_mean, scale_sd, logm_bin_centers = np.asarray(scale_mean), np.asarray(scale_sd), np.asarray(logm_bin_centers)
+    
+    mu_dim = len(logm_bin_centers) if mu_dim is None else 1.
+    
+    hmin = H0grid[0]/100
+    hmax = H0grid[-1]/100
+    
+    kappamin = kappagrid[0]
+    kappamax = kappagrid[-1]
 
     with pm.Model() as model:
         h = pm.Uniform('h', hmin, hmax)

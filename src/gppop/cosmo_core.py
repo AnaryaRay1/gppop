@@ -197,7 +197,7 @@ def compute_gp_inputs(mbins):
     return scale_mean, scale_sd, logm_bin_centers
 
 
-def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, kappagrid, p_pe=None):
+def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, Om0grid, kappagrid, p_pe=None):
     if p_pe is None:
         p_pe = samples[:,:,2]**2
     nbins_m = int(len(mbins)*(len(mbins)-1)/2)
@@ -208,54 +208,56 @@ def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0g
     VT_means = []
     VT_sigmas = []
     for k in tqdm(range(len(H0grid))):
-        for j in range(len(kappagrid)):
-            VT_mean, VT_sigma = VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0grid[k], Om0=Om0Planck, kappa=kappagrid[j], Tobs=Tobs, mixture_weights=1.0)
-            VT_means.append(VT_mean)
-            VT_sigmas.append(VT_sigma)
+        for l in range(len(Om0grid)):
+            for j in range(len(kappagrid)):
+                VT_mean, VT_sigma = VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0grid[k], Om0=Om0grid[l], kappa=kappagrid[j], Tobs=Tobs, mixture_weights=1.0)
+                VT_means.append(VT_mean)
+                VT_sigmas.append(VT_sigma)
 
-    VT_means = jnp.array(VT_means).reshape(len(H0grid),len(kappagrid),len(bingrid))
-    VT_sigmas = jnp.array(VT_sigmas).reshape(len(H0grid),len(kappagrid),len(bingrid))
+    VT_means = jnp.array(VT_means).reshape(len(H0grid),len(Om0grid),len(kappagrid),len(bingrid))
+    VT_sigmas = jnp.array(VT_sigmas).reshape(len(H0grid),len(Om0grid),len(kappagrid),len(bingrid))
 
     weights_means = []
     weights_sigmas = []
 
     for i in tqdm(range(len(event_grid))):
         for k in range(len(H0grid)):
-            for j in range(len(kappagrid)):
-                weight_mean, weight_sigma = compute_weight_single_ev(samples[i], p_pe[i], mbins, H0=H0grid[k], Om0=Om0Planck, kappa=kappagrid[j])
-                weights_means.append(weight_mean)
-                weights_sigmas.append(weight_sigma)
+            for l in range(len(Om0grid)):
+                for j in range(len(kappagrid)):
+                    weight_mean, weight_sigma = compute_weight_single_ev(samples[i], p_pe[i], mbins, H0=H0grid[k], Om0=Om0grid[l], kappa=kappagrid[j])
+                    weights_means.append(weight_mean)
+                    weights_sigmas.append(weight_sigma)
 
-    weights_means = jnp.array(weights_means).reshape(len(event_grid),len(H0grid),len(kappagrid),len(bingrid))
-    weights_sigmas = jnp.array(weights_sigmas).reshape(len(event_grid),len(H0grid),len(kappagrid),len(bingrid))
+    weights_means = jnp.array(weights_means).reshape(len(event_grid),len(H0grid),len(Om0grid),len(kappagrid),len(bingrid))
+    weights_sigmas = jnp.array(weights_sigmas).reshape(len(event_grid),len(H0grid),len(Om0grid),len(kappagrid),len(bingrid))
 
     return weights_means, weights_sigmas, VT_means, VT_sigmas
 
 
-def setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, bingrid, event_grid):    
-    limits_VT = [(H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
+def setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, Om0grid, kappagrid, bingrid, event_grid):    
+    limits_VT = [(H0grid[0], H0grid[-1]), (Om0grid[0], Om0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
 
     VT_means_grid = CartesianGrid(limits_VT, VT_means, mode='nearest')
     VT_sigmas_grid = CartesianGrid(limits_VT, VT_sigmas, mode='nearest')
 
-    VT_means_H0kappa = jit(vmap(VT_means_grid, in_axes=(None,None,0), out_axes=0))
-    VT_sigmas_H0kappa = jit(vmap(VT_sigmas_grid, in_axes=(None,None,0), out_axes=0))
+    VT_means_H0kappa = jit(vmap(VT_means_grid, in_axes=(None,None,None,0), out_axes=0))
+    VT_sigmas_H0kappa = jit(vmap(VT_sigmas_grid, in_axes=(None,None,None,0), out_axes=0))
 
-    limits_weights = [(event_grid[0], event_grid[-1]), (H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
+    limits_weights = [(event_grid[0], event_grid[-1]), (H0grid[0], H0grid[-1]), (Om0grid[0], Om0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
 
     weights_means_grid = CartesianGrid(limits_weights, weights_means, mode='nearest')
     weights_sigmas_grid = CartesianGrid(limits_weights, weights_sigmas, mode='nearest')
 
-    weights_means_H0kappa = jit(vmap(weights_means_grid, in_axes=(None,None,None,0), out_axes=0))
-    weights_means_eventH0kappa = jit(vmap(weights_means_H0kappa, in_axes=(0,None,None,None), out_axes=0))
+    weights_means_H0kappa = jit(vmap(weights_means_grid, in_axes=(None,None,None,None,0), out_axes=0))
+    weights_means_eventH0kappa = jit(vmap(weights_means_H0kappa, in_axes=(0,None,None,None,None), out_axes=0))
 
-    weights_sigmas_H0kappa = jit(vmap(weights_sigmas_grid, in_axes=(None,None,None,0), out_axes=0))
-    weights_sigmas_eventH0kappa = jit(vmap(weights_sigmas_H0kappa, in_axes=(0,None,None,None), out_axes=0))
+    weights_sigmas_H0kappa = jit(vmap(weights_sigmas_grid, in_axes=(None,None,None,None,0), out_axes=0))
+    weights_sigmas_eventH0kappa = jit(vmap(weights_sigmas_H0kappa, in_axes=(0,None,None,None,None), out_axes=0))
     
     return VT_means_H0kappa, VT_sigmas_H0kappa, weights_means_eventH0kappa, weights_sigmas_eventH0kappa
 
 
-def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, mbins, mu_std=1, mu_dim=None):
+def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, Om0grid, kappagrid, mbins, mu_std=1, mu_dim=None):
     
     weights_means = np.asarray(weights_means)
     weights_sigmas = np.asarray(weights_sigmas)
@@ -263,6 +265,7 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
     VT_sigmas = np.asarray(VT_sigmas)
     
     H0grid = np.asarray(H0grid)
+    Om0grid = np.asarray(Om0grid)
     kappagrid = np.asarray(kappagrid)
     
     nbins_m = int(len(mbins)*(len(mbins)-1)/2)
@@ -272,81 +275,85 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
     bingrid = np.asarray(bingrid)
     event_grid = np.asarray(event_grid)
     
-    VT_means_H0kappa, VT_sigmas_H0kappa, weights_means_eventH0kappa, weights_sigmas_eventH0kappa = setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, kappagrid, bingrid, event_grid)
+    VT_means_H0kappa, VT_sigmas_H0kappa, weights_means_eventH0kappa, weights_sigmas_eventH0kappa = setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, Om0grid, kappagrid, bingrid, event_grid)
    
-    def VT_numerical_grid(H0,kappa,bingrid):
-        return VT_means_H0kappa(H0,kappa,bingrid), VT_sigmas_H0kappa(H0,kappa,bingrid)
+    def VT_numerical_grid(H0,Om0,kappa,bingrid):
+        return VT_means_H0kappa(H0,Om0,kappa,bingrid), VT_sigmas_H0kappa(H0,Om0,kappa,bingrid)
 
-    def weights_numerical_grid(event_grid,H0,kappa,bingrid):
-        return [weights_means_eventH0kappa(event_grid,H0,kappa,bingrid), weights_sigmas_eventH0kappa(event_grid,H0,kappa,bingrid)]
+    def weights_numerical_grid(event_grid,H0,Om0,kappa,bingrid):
+        return [weights_means_eventH0kappa(event_grid,H0,Om0,kappa,bingrid), weights_sigmas_eventH0kappa(event_grid,H0,Om0,kappa,bingrid)]
     
     class ComputeWeightsOp(at.Op):
-        itypes = [at.dvector, at.dscalar, at.dscalar, at.dvector]
+        itypes = [at.dvector, at.dscalar, at.dscalar, at.dscalar, at.dvector]
         otypes = [at.dmatrix, at.dmatrix]
 
-        def make_node(self, event_grid, H0, kappa, bingrid):
+        def make_node(self, event_grid, H0, Om0, kappa, bingrid):
             event_grid = at.as_tensor_variable(event_grid)
             H0 = at.as_tensor_variable(H0)
+            Om0 = at.as_tensor_variable(Om0)
             kappa = at.as_tensor_variable(kappa)
             bingrid = at.as_tensor_variable(bingrid)
 
-            return ae.graph.basic.Apply(self, [event_grid, H0, kappa, bingrid], [at.dmatrix(),at.dmatrix()])
+            return ae.graph.basic.Apply(self, [event_grid, H0, Om0, kappa, bingrid], [at.dmatrix(), at.dmatrix()])
 
         def perform(self, node, inputs, outputs):
-            event_grid, H0, kappa, bingrid = inputs
+            event_grid, H0, Om0, kappa, bingrid = inputs
 
-            out = weights_numerical_grid(event_grid, H0, kappa, bingrid)
+            out = weights_numerical_grid(event_grid, H0, Om0, kappa, bingrid)
 
             outputs[0][0] = np.asarray(out[0])
             outputs[1][0] = np.asarray(out[1])
 
         def grad(self, inputs, gradients):
-            event_grid, H0, kappa, bingrid = inputs
+            event_grid, H0, Om0, kappa, bingrid = inputs
             grad_event_grid = at.zeros_like(event_grid)
             grad_H0 = at.zeros_like(H0)
+            grad_Om0 = at.zeros_like(Om0)
             grad_kappa = at.zeros_like(kappa)
             grad_bingrid = at.zeros_like(bingrid)
-            return [grad_event_grid, grad_H0, grad_kappa, grad_bingrid]
+            return [grad_event_grid, grad_H0, grad_Om0, grad_kappa, grad_bingrid]
 
     class ComputeVTsOp(at.Op):
-        itypes = [at.dscalar, at.dscalar, at.dvector]
+        itypes = [at.dscalar, at.dscalar, at.dscalar, at.dvector]
         otypes = [at.dvector, at.dvector]
 
-        def make_node(self, H0, kappa, bingrid):
+        def make_node(self, H0, Om0, kappa, bingrid):
             H0 = at.as_tensor_variable(H0)
+            Om0 = at.as_tensor_variable(Om0)
             kappa = at.as_tensor_variable(kappa)
             bingrid = at.as_tensor_variable(bingrid)
 
-            return ae.graph.basic.Apply(self, [H0, kappa, bingrid], [at.dvector(), at.dvector()])
+            return ae.graph.basic.Apply(self, [H0, Om0, kappa, bingrid], [at.dvector(), at.dvector()])
 
         def perform(self, node, inputs, outputs):
-            H0, kappa, bingrid = inputs
+            H0, Om0, kappa, bingrid = inputs
 
-            out = VT_numerical_grid(H0, kappa, bingrid)
+            out = VT_numerical_grid(H0, Om0, kappa, bingrid)
 
             outputs[0][0] = np.asarray(out[0])
             outputs[1][0] = np.asarray(out[1])
 
         def grad(self, inputs, gradients):
-            H0, kappa, bingrid = inputs
+            H0, Om0, kappa, bingrid = inputs
             grad_H0 = at.zeros_like(H0)
+            grad_Om0 = at.zeros_like(Om0)
             grad_kappa = at.zeros_like(kappa)
             grad_bingrid = at.zeros_like(bingrid)
-            return [grad_H0, grad_kappa, grad_bingrid]
+            return [grad_H0, grad_Om0, grad_kappa, grad_bingrid]
 
     compute_weights_op = ComputeWeightsOp()
     compute_VTs_op = ComputeVTsOp()
     
     @jax_funcify.register(ComputeWeightsOp)
     def jax_funcify_compute_weights_op(op,**kwargs):
-        def compute_weights_op(event_grid, H0, kappa, bingrid):
-              return weights_numerical_grid(event_grid, H0, kappa, bingrid)
+        def compute_weights_op(event_grid, H0, Om0, kappa, bingrid):
+              return weights_numerical_grid(event_grid, H0, Om0, kappa, bingrid)
         return compute_weights_op
     
     @jax_funcify.register(ComputeVTsOp)
     def jax_funcify_compute_weights_op(op,**kwargs):
-        def compute_VTs_op(H0, kappa, bingrid):
-              return VT_numerical_grid(H0, kappa, bingrid)
+        def compute_VTs_op(H0, Om0, kappa, bingrid):
+              return VT_numerical_grid(H0, Om0, kappa, bingrid)
         return compute_VTs_op
     
     scale_mean, scale_sd, logm_bin_centers = compute_gp_inputs(mbins)
@@ -357,6 +364,9 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
     hmin = H0grid[0]/100
     hmax = H0grid[-1]/100
     
+    Om0min = Om0grid[0]
+    Om0max = Om0grid[-1]
+    
     kappamin = kappagrid[0]
     kappamax = kappagrid[-1]
 
@@ -365,7 +375,7 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
         H0 = 100*h
         
         kappa = pm.Uniform('kappa', kappamin, kappamax)
-        Om0 = pm.Deterministic('Om0', at.as_tensor_variable(Om0Planck))
+        Om0 = pm.Uniform('Om0', Om0min, Om0max)
         
         mu = pm.TruncatedNormal('mu', mu=0, sigma=mu_std, lower=-5.0, upper=5.0, shape=mu_dim)
         sigma = pm.HalfNormal('sigma', sigma=1)
@@ -378,8 +388,8 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
         logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
         n_corr = pm.Deterministic('n_corr', at.exp(logn_tot))
         
-        [weights, weight_sigmas] = compute_weights_op(event_grid,H0,kappa,bingrid)
-        [vts, vt_sigmas] = compute_VTs_op(H0,kappa,bingrid)
+        [weights, weight_sigmas] = compute_weights_op(event_grid,H0,Om0,kappa,bingrid)
+        [vts, vt_sigmas] = compute_VTs_op(H0,Om0,kappa,bingrid)
         
         N_F_exp = pm.Deterministic('N_F_exp', at.sum(n_corr*vts))
         

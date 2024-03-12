@@ -28,10 +28,10 @@ from astropy import constants, units as u
 
 from jaxinterp2d import interp2d, CartesianGrid
 
-from logbesselk.jax import log_bessel_k as log_k
+#from logbesselk.jax import log_bessel_k as log_k
 
 
-log_k_vec = jax.jit(jax.vmap(log_k,(None,0),0))
+#log_k_vec = jax.jit(jax.vmap(log_k,(None,0),0))
 
 jax.config.update("jax_enable_x64", True)
 
@@ -404,3 +404,73 @@ def sample_pymc(model, njobs=1, ndraw=1000, ntune=1000, target_accept=0.7):
                                                     target_accept=target_accept)
         return trace
 
+def compute_neff(H0grid,kappagrid, weights_means, weights_sigmas, VT_means, VT_sigmas,mbins,H0samples,kappasamples,ncorrsamples):
+    
+    weights_means = np.asarray(weights_means)
+    weights_sigmas = np.asarray(weights_sigmas)
+    VT_means = np.asarray(VT_means)
+    VT_sigmas = np.asarray(VT_sigmas)
+    
+    H0grid = np.asarray(H0grid)
+    kappagrid = np.asarray(kappagrid)
+    hmin = H0grid[0]/100
+    hmax = H0grid[-1]/100
+    
+    kappamin = kappagrid[0]
+    kappamax = kappagrid[-1]
+    
+    nbins_m = int(len(mbins)*(len(mbins)-1)/2)
+    bingrid = jnp.arange(nbins_m)
+    event_grid = jnp.arange(weights_means.shape[0])
+    print(event_grid)
+
+    limits_VT = [(H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
+
+    VT_means_grid = CartesianGrid(limits_VT, VT_means, mode='nearest')
+    VT_sigmas_grid = CartesianGrid(limits_VT, VT_sigmas, mode='nearest')
+
+    def VT_means_(H0,kappa,mbin):
+        return VT_means_grid(H0,kappa,mbin)
+
+    def VT_sigmas_(H0,kappa,mbin):
+        return VT_sigmas_grid(H0,kappa,mbin)
+
+    VT_means_H0kappa = jit(vmap(VT_means_, in_axes=(None,None,0), out_axes=0))
+    VT_sigmas_H0kappa = jit(vmap(VT_sigmas_, in_axes=(None,None,0), out_axes=0))
+
+    def VT_numerical_grid(H0,kappa,bingrid):
+        return VT_means_H0kappa(H0,kappa,bingrid), VT_sigmas_H0kappa(H0,kappa,bingrid)
+
+    limits_weights = [(event_grid[0], event_grid[-1]), (H0grid[0], H0grid[-1]), (kappagrid[0], kappagrid[-1]), (bingrid[0], bingrid[-1])]
+
+    weights_means_grid = CartesianGrid(limits_weights, weights_means, mode='nearest')
+    weights_sigmas_grid = CartesianGrid(limits_weights, weights_sigmas, mode='nearest')
+
+    def weights_means_(event,H0,kappa,mbin):
+        return weights_means_grid(event,H0,kappa,mbin)
+
+    def weights_sigmas_(event,H0,kappa,mbin):
+        return weights_sigmas_grid(event,H0,kappa,mbin)
+
+    weights_means_H0kappa = jit(vmap(weights_means_, in_axes=(None,None,None,0), out_axes=0))
+    weights_means_eventH0kappa = jit(vmap(weights_means_H0kappa, in_axes=(0,None,None,None), out_axes=0))
+
+    weights_sigmas_H0kappa = jit(vmap(weights_sigmas_, in_axes=(None,None,None,0), out_axes=0))
+    weights_sigmas_eventH0kappa = jit(vmap(weights_sigmas_H0kappa, in_axes=(0,None,None,None), out_axes=0))
+
+    def weights_numerical_grid(event_grid,H0,kappa,bingrid):
+        return [weights_means_eventH0kappa(event_grid,H0,kappa,bingrid), weights_sigmas_eventH0kappa(event_grid,H0,kappa,bingrid)]
+    
+    n_eff_sel = [ ]
+    n_exp_sel = [ ]
+    n_eff_post = [ ]
+    for H0, kappa, n_corr in tqdm(zip(H0samples,kappasamples,ncorrsamples)):
+        w_mean,w_std = weights_numerical_grid(event_grid,H0,kappa,bingrid)
+        vt_mean, vt_std = VT_numerical_grid(H0,kappa,bingrid)
+        this_n_eff_sel = (vt_mean/vt_std)**2
+        this_n_eff_sel = this_n_eff_sel.at[vt_std==0].set(0.)
+        n_eff_sel.append(this_n_eff_sel)
+        n_exp_sel.append(n_corr*vt_mean)
+        n_eff_post.append( (np.sum(n_corr[np.newaxis,:]*w_mean,axis=-1)**2/np.sum((n_corr**2)[np.newaxis,:]*(w_std**2),axis=-1)).min())
+    
+    return np.array(n_exp_sel),np.array(n_eff_sel),np.array(n_eff_post)

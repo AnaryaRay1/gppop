@@ -257,7 +257,7 @@ def setup_interpolators(weights_means, weights_sigmas, VT_means, VT_sigmas, H0gr
     return VT_means_H0kappa, VT_sigmas_H0kappa, weights_means_eventH0kappa, weights_sigmas_eventH0kappa
 
 
-def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, Om0grid, kappagrid, mbins, mu_std=1, mu_dim=None):
+def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, VT_sigmas, H0grid, Om0grid, kappagrid, mbins, mu_upper=5, mu_lower=-5, mu_std=1, mu_dim=None):
     
     weights_means = np.asarray(weights_means)
     weights_sigmas = np.asarray(weights_sigmas)
@@ -377,7 +377,7 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
         kappa = pm.Uniform('kappa', kappamin, kappamax)
         Om0 = pm.Uniform('Om0', Om0min, Om0max)
         
-        mu = pm.TruncatedNormal('mu', mu=0, sigma=mu_std, lower=-5.0, upper=5.0, shape=mu_dim)
+        mu = pm.TruncatedNormal('mu', mu=0, sigma=mu_std, lower=mu_upper, upper=mu_lower, shape=mu_dim)
         sigma = pm.HalfNormal('sigma', sigma=1)
         length_scale = pm.Lognormal('length_scale', mu=scale_mean, sigma=scale_sd)
         
@@ -433,7 +433,7 @@ def compute_neff(H0grid, Om0grid, kappagrid, weights_means, weights_sigmas, VT_m
     n_eff_sel = [ ]
     n_exp_sel = [ ]
     n_eff_post = [ ]
-    for H0, Om0, kappa, n_corr in tqdm(zip(H0samples,Om0samples kappasamples,ncorrsamples)):
+    for H0, Om0, kappa, n_corr in tqdm(zip(H0samples,Om0samples,kappasamples,ncorrsamples)):
         [w_mean,w_std] = weights_numerical_grid(event_grid,H0,Om0,kappa,bingrid)
         vt_mean, vt_std = VT_numerical_grid(H0,Om0,kappa,bingrid)
         this_n_eff_sel = (vt_mean/vt_std)**2

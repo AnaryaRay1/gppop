@@ -377,7 +377,7 @@ def make_gp_spectral_siren_model_pymc(weights_means, weights_sigmas, VT_means, V
         kappa = pm.Uniform('kappa', kappamin, kappamax)
         Om0 = pm.Uniform('Om0', Om0min, Om0max)
         
-        mu = pm.TruncatedNormal('mu', mu=0, sigma=mu_std, lower=mu_upper, upper=mu_lower, shape=mu_dim)
+        mu = pm.TruncatedNormal('mu', mu=0, sigma=mu_std, lower=mu_lower, upper=mu_upper, shape=mu_dim)
         sigma = pm.HalfNormal('sigma', sigma=1)
         length_scale = pm.Lognormal('length_scale', mu=scale_mean, sigma=scale_sd)
         

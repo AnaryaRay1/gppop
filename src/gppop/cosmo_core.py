@@ -197,9 +197,11 @@ def compute_gp_inputs(mbins):
     return scale_mean, scale_sd, logm_bin_centers
 
 
-def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, Om0grid, kappagrid, p_pe=None):
+def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0grid, Om0grid, kappagrid, p_pe=None, mixture_weights=None):
     if p_pe is None:
         p_pe = samples[:,:,2]**2
+    if mixture_weights is None:
+        mixture_weights = 1.0
     nbins_m = int(len(mbins)*(len(mbins)-1)/2)
     bingrid = jnp.arange(nbins_m)
     
@@ -210,7 +212,7 @@ def precompute_weights_VTs(samples, det_samples, p_draw, Ndraw, mbins, Tobs, H0g
     for k in tqdm(range(len(H0grid))):
         for l in range(len(Om0grid)):
             for j in range(len(kappagrid)):
-                VT_mean, VT_sigma = VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0grid[k], Om0=Om0grid[l], kappa=kappagrid[j], Tobs=Tobs, mixture_weights=1.0)
+                VT_mean, VT_sigma = VT_numerical(det_samples, p_draw, Ndraw, mbins, H0=H0grid[k], Om0=Om0grid[l], kappa=kappagrid[j], Tobs=Tobs, mixture_weights=mixture_weights)
                 VT_means.append(VT_mean)
                 VT_sigmas.append(VT_sigma)
 

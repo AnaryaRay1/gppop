@@ -975,7 +975,7 @@ class Utils_spins():
             array=np.append(array,arr[:,:,i][lower_tri_indices])
         return array
 
-    def compute_weights(self,samples,m1m2_given_z_prior=None,chi_prior=None):
+    def compute_weights(self,samples,m1m2_given_z_prior=None,chi_prior=None,leftmost_chibin=None):
         '''
         Function to compute the weights needed to reweight
         posterior samples to the population distribution,
@@ -1009,7 +1009,11 @@ class Utils_spins():
         dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
         m1_indices = np.clip(np.searchsorted(self.mbins,m1_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
         m2_indices = np.clip(np.searchsorted(self.mbins,m2_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
-        chi_indices = np.clip(np.searchsorted(self.chi_bins,chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-2)
+        if leftmost_chibin is None:
+            chi_indices = np.clip(np.searchsorted(self.chi_bins,chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-2)
+        else:
+            chi_indices = np.clip(np.searchsorted(np.append([leftmost_chibin], self.chi_bins),chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-1)
+            
         pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/((1+z_samples)**(self.kappa-1))
         ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
         if m1m2_given_z_prior is None:
@@ -1019,8 +1023,12 @@ class Utils_spins():
         pz_PE*=chi_prior
         pz_weight = pz_pop/pz_PE
         indices = zip(m1_indices,m2_indices,chi_indices)
-        for i,inds in enumerate(indices):
-                weights[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i]*m2_samples[i])
+        if leftmost_chibin is None:
+            for i,inds in enumerate(indices):
+                    weights[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i]*m2_samples[i])
+        else:
+            for i,inds in enumerate(indices):
+                    weights[inds[0],inds[1],inds[2]-1] += float(inds[2]>0)*pz_weight[i]/(m1_samples[i]*m2_samples[i])
         weights /= sum(sum(sum(weights)))
         return weights
 
@@ -1215,7 +1223,7 @@ class Post_Proc_Utils_spins(Utils_spins):
     marginal distributions.
     """
     
-    def __init__(self,mbins, chi_bins):
+    def __init__(self,mbins, chi_bins,kappa=2.7):
         '''
         Initialize post-processing utilities class.
         
@@ -1229,7 +1237,7 @@ class Post_Proc_Utils_spins(Utils_spins):
                  1d array containing redshift bin edges.
         '''
         
-        Utils_spins.__init__(self,mbins,chi_bins)
+        Utils_spins.__init__(self,mbins,chi_bins,kappa=kappa)
     
     def reshape_uncorr(n_corr,n_corr_chi):
         '''
@@ -1314,7 +1322,7 @@ class Post_Proc_Utils_spins(Utils_spins):
             mass1 = np.append(mass1,m_array)
         return mass1,Rpm1
     
-    def get_Rpm1_corr(n_corr,delta_logm2_array,delta_chi_array,m1_bins,m2_bins,log_bin_centers,chi_low,chi_high):
+    def get_Rpm1_corr(self,n_corr,delta_logm2_array,delta_chi_array,m1_bins,m2_bins,log_bin_centers,chi_low,chi_high):
         '''
         Function for computing conditional primary mass population: p(m_1|z)
         evaluated at redshifts belonging to some range
@@ -1353,7 +1361,7 @@ class Post_Proc_Utils_spins(Utils_spins):
                       at redshifts belonging to a particular range
         
         '''
-        Rpm1 = np.array([])
+        Rpm1 = np.zeros([len(n_corr),1])
         mass1 = np.array([])
         for i in range(len(m1_bins)-1):
                 m1_low = m1_bins[i]
@@ -1364,12 +1372,12 @@ class Post_Proc_Utils_spins(Utils_spins):
                 idx_array = np.arange(len(log_bin_centers))
                 bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
                        (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
-                rate_density_array = n_corr[bin_idx]
+                rate_density_array = n_corr[:,bin_idx]
                 delta_logm2s = delta_logm2_array[bin_idx]
                 delta_chis= delta_chi_array[bin_idx]
-                Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_logm2s*delta_chis)/m for m in m_array])
+                Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*((delta_logm2s*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:])),axis=1)
                 mass1 = np.append(mass1,m_array)
-        return mass1,Rpm1
+        return mass1,Rpm1[:,1:]
         
     def get_Rpm2(n_corr,delta_logm1_array,m1_bins,m2_bins,chi_bins,log_bin_centers):
         '''
@@ -1407,7 +1415,7 @@ class Post_Proc_Utils_spins(Utils_spins):
                       1d array of dR/dm1 evaluated at the above m1 values
         
         '''
-        Rpm1 = np.array([])
+        Rpm1 = np.zeros([len(n_corr),1])
         mass1 = np.array([])
         for i in range(len(m2_bins)-1):
             m2_low = m1_bins[i]
@@ -1420,13 +1428,14 @@ class Post_Proc_Utils_spins(Utils_spins):
             idx_array = np.arange(len(log_bin_centers))
             bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
                    (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
-            rate_density_array = n_corr[bin_idx]
-            delta_logm2s = delta_logm2_array[bin_idx]
-            Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
+            rate_density_array = n_corr[:,bin_idx]
+            delta_logm1s = delta_logm1_array[bin_idx]
+            Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*delta_logm1s[None,:],axis=1)[:,None]/(m_array[None,:])),axis=1)
+            #np.append(Rpm1,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
             mass1 = np.append(mass1,m_array)
-        return mass1,Rpm1
+        return mass1,Rpm1[:,1:]
     
-    def get_Rpm2_corr(n_corr,delta_logm1_array,delta_chi_array,m1_bins,m2_bins,log_bin_centers,chi_low,chi_high):
+    def get_Rpm2_corr(self,n_corr,delta_logm1_array,delta_chi_array,m1_bins,m2_bins,log_bin_centers,chi_low,chi_high):
         '''
         Function for computing conditional primary mass population: p(m_1|z)
         evaluated at redshifts belonging to some range
@@ -1465,7 +1474,7 @@ class Post_Proc_Utils_spins(Utils_spins):
                       at redshifts belonging to a particular range
         
         '''
-        Rpm2 = np.array([])
+        Rpm2 = np.zeros([len(n_corr),1])
         mass2 = np.array([])
         for i in range(len(m2_bins)-1):
                 m1_low = m1_bins[0]
@@ -1476,36 +1485,36 @@ class Post_Proc_Utils_spins(Utils_spins):
                 idx_array = np.arange(len(log_bin_centers))
                 bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
                        (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
-                rate_density_array = n_corr[bin_idx]
+                rate_density_array = n_corr[:,bin_idx]
                 delta_logm1s = delta_logm1_array[bin_idx]
                 delta_chis= delta_chi_array[bin_idx]
-                Rpm2 = np.append(Rpm2,[np.sum(rate_density_array*delta_logm1s*delta_chis)/m for m in m_array])
+                Rpm2 = np.concatenate((Rpm2,(np.sum(rate_density_array*((delta_logm1s*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:]))),axis=1)
                 mass2 = np.append(mass2,m_array)
-        return mass2,Rpm2
+        return mass2,Rpm2[:,1:]
 
-    def get_Rpchi_q(self,log_bin_centersn_corr_samples,chi_bins,dm1,dm2,q_min,q_max):
+    def get_Rpchi_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,q_min,q_max):
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
         ones[diag_idx]*=2.
         nbins_chi = len(chi_bins)-1
-        Rp_chi,chi = np.zeros((len(n_corr_samples),100)),np.array([ ])
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
         for i in range(nbins_chi):
             idx_array = np.arange(len(log_bin_centers))
-            bin_idx = idx_array[(log_bin_centers[:,1]<log_bin_centers[:,0]*q_max)&(log_bin_centers[:,2]>=chi_bins[i]*q_min)&(log_bin_centers[:,2]<=chi_bins[i+1])]
+            bin_idx = idx_array[(log_bin_centers[:,1]<=log_bin_centers[:,0]+np.log(q_max))&(log_bin_centers[:,1]>log_bin_centers[:,0]+np.log(q_min))&(log_bin_centers[:,2]>=chi_bins[i])&(log_bin_centers[:,2]<=chi_bins[i+1])]
             this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dm2[None,:]*ones[None,:])[:,bin_idx],axis=-1)
             
             this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
             chi=np.append(chi,this_chi)
             Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
 
-        return chi, Rp_chi[:,100:]
+        return chi, Rp_chi[:,1:]
 
-    def get_Rpchi_m(self,log_bin_centersn_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
+    def get_Rpchi_m(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
         ones[diag_idx]*=2.
         nbins_chi = len(chi_bins)-1
-        Rp_chi,chi = np.zeros((len(n_corr_samples),100)),np.array([ ])
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
 
         for i in range(nbins_chi):
             idx_array = np.arange(len(log_bin_centers))
@@ -1520,14 +1529,14 @@ class Post_Proc_Utils_spins(Utils_spins):
             chi=np.append(chi,this_chi)
             Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
 
-        return chi, Rp_chi[:,100:]
+        return chi, Rp_chi[:,1:]
 
-    def get_Rpchi_m_complement(self,log_bin_centersn_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
+    def get_Rpchi_m_complement(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
         ones[diag_idx]*=2.
         nbins_chi = len(chi_bins)-1
-        Rp_chi,chi = np.zeros((len(n_corr_samples),100)),np.array([ ])
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
 
         for i in range(nbins_chi):
             idx_array = np.arange(len(log_bin_centers))
@@ -1542,7 +1551,7 @@ class Post_Proc_Utils_spins(Utils_spins):
             chi=np.append(chi,this_chi)
             Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
 
-        return chi, Rp_chi[:,100:]
+        return chi, Rp_chi[:,1:]
 
     def get_Rp_chi(self,chi_bins,mbins,dm1,dm2,n_corr_chi_samples,n_corr_samples,n_corr_m_samples,log_bin_centers):
 
@@ -2351,7 +2360,7 @@ class Rates_spins(Utils_spins):
         bin_centers_chi = log_bin_centers[0::nm,2][:,None]
         log_bin_centers_m = log_bin_centers[:nm,:2]
         with pm.Model() as gp_model:
-            mu = pm.Normal('mu',mu=0,sigma=10,shape=mu_dim)
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
             length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
             length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)

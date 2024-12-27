@@ -942,8 +942,11 @@ class Utils_spins():
         mbins :: numpy.ndarray 
                  1d array containing mass bin edges
         
-        zbins :: numpy.ndarray
-                 1d array containing redshift bin edges.
+        chi_bins :: numpy.ndarray
+                 1d array containing effective spin bin edges.
+
+        kappa   :: float
+                   redshift evolution of the merger rate.
         
         '''
         self.mbins = mbins
@@ -975,12 +978,11 @@ class Utils_spins():
             array=np.append(array,arr[:,:,i][lower_tri_indices])
         return array
 
-    def compute_weights(self,samples,m1m2_given_z_prior=None,chi_prior=None,leftmost_chibin=None):
+    def compute_weights(self,samples,m1m2_given_z_prior=None,chi_prior=None,leftmost_chibin=None,full_prior=None,O4_prior = False):
         '''
         Function to compute the weights needed to reweight
         posterior samples to the population distribution,
-        for an event in parameter bins. This implements Equation
-        A.1 of https://arxiv.org/pdf/2304.08046.pdf.
+        for an event in parameter bins. 
 
         Parameters
         ----------
@@ -992,12 +994,33 @@ class Utils_spins():
                               the values of the p(m_1,m_2|z) function used
                               in PE need to be supplied corresponding to
                               each posterior sample.
+
+        chi_prior          :: numpy.ndarray
+                              The PE prior on effective spin marginalized over  
+                              other spin parameters, (can be conditioned over 
+                              masses, see https://arxiv.org/abs/2104.09508)
+
+        left_most_chi_bin  :: float
+                              the edge of the smallest effective spin bin. If there are 
+                              too many posterior samples outside this bin then this 
+                              argument is used to prevent numpy.searchsorted to assign
+                              large weights to this bin.
+
+
+        full_prior         :: numpy.ndarray
+                              If instead of individual priors the full p(m1,m2,chi_eff,z)
+                              is provided for every sample.
+
+        O4_prior           :: bool
+                              If True, it will assume a uniform in co-moving volume 
+                              prior on distance/redshift instead of the older dL^2 prior
+                              which is assumed if False.
         
         Returns
         -------
         weights : numpy.ndarray
                   The weight matrix of shape(mbins,mbins) for m1,m2 only 
-                  inference and of shape(mbins,mbins,zbins) for m1,m2,z
+                  inference and of shape(mbins,mbins,chi_bins) for m1,m2,chi_eff
                   inference.
         '''
         weights = np.zeros([len(self.mbins)-1,len(self.mbins)-1,len(self.chi_bins)-1])
@@ -1014,13 +1037,17 @@ class Utils_spins():
         else:
             chi_indices = np.clip(np.searchsorted(np.append([leftmost_chibin], self.chi_bins),chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-1)
             
-        pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/((1+z_samples)**(self.kappa-1))
-        ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
-        if m1m2_given_z_prior is None:
-            pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
-        else : 
-            pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
-        pz_PE*=chi_prior
+        pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value*((1+z_samples)**(self.kappa-1))
+        if full_prior is None:
+            ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
+            m1m2_given_z_prior = m1m2_given_z_prior if m1m2_given_z_prior is not None else (1+z_samples)**2
+            if not O4_prior:
+                pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+            else : 
+                pz_PE = m1m2_given_z_prior * Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z) # m1m2_given_z_prior * dl_values**2 * ddL_dz
+            pz_PE*=chi_prior
+        else:
+            pz_PE=full_prior
         pz_weight = pz_pop/pz_PE
         indices = zip(m1_indices,m2_indices,chi_indices)
         if leftmost_chibin is None:
@@ -1056,9 +1083,8 @@ class Utils_spins():
     
     def tril_edges(self):
         '''
-        A function that returns the m1,m2,z edges of each bin
-        (or m1,m2 edges for mass-only inference) in the form of 
-        the output of arraynd_to_tril()
+        A function that returns the m1,m2,chi_eff edges of each bin
+        in the form of the output of arraynd_to_tril()
         
         Returns
         -------
@@ -1080,13 +1106,13 @@ class Utils_spins():
 
     def generate_log_bin_centers(self):
         '''
-        Function that returns n-D bin centers in logm1,logm2,z space.
+        Function that returns n-D bin centers in logm1,logm2,chi_eff space.
 
         Returns
         -------
         log_lower_tri_sorted : numpy.ndarray
-                               n-D array of the  bin centers in logm1 space and
-                               redshift bins in linear space.
+                               n-D array of the  bin centers in logm space and
+                               chi_eff bins in linear space.
         '''
         # zbins = np.log(self.zbins+1.0e-300)
         for k in range(len(self.chi_bins)-1):
@@ -1121,7 +1147,7 @@ class Utils_spins():
             1-D array of lower triangular entries.
         nbins_m : int
             number of mass bins
-        nbins_z : int
+        nbins_chi : int
             number of redshift bins
             
         Returns
@@ -1194,13 +1220,10 @@ class Utils_spins():
     
     def delta_chis(self):
         '''
-        A function that returns delta log(m2) for each bin in the
+        A function that returns delta chi_eff for each bin in the
         lower triangular format of the output of arraynd_to_tril.
         
-        Parameters
-        ----------
-        mbins : numpy array of mass bin edges
-        
+               
         Returns
         -------
         
@@ -1233,13 +1256,13 @@ class Post_Proc_Utils_spins(Utils_spins):
         mbins :: numpy.ndarray 
                  1d array containing mass bin edges
         
-        zbins :: numpy.ndarray
-                 1d array containing redshift bin edges.
+        chi_bins :: numpy.ndarray
+                 1d array containing effective spin bin edges.
         '''
         
         Utils_spins.__init__(self,mbins,chi_bins,kappa=kappa)
     
-    def reshape_uncorr(n_corr,n_corr_chi):
+    def reshape_uncorr(self,n_corr,n_corr_chi):
         '''
         Function for combining uncorrelated mass and 
         redshift rate densities into combined rate
@@ -1251,7 +1274,7 @@ class Post_Proc_Utils_spins(Utils_spins):
         n_corr   :: numpy.ndarray
                     array containing rate-densities w.r.t. mass bins
         
-        n_corr_z :: numpy.ndarray
+        n_corr_chi :: numpy.ndarray
                     array containing rate densities w.r.t. redshift bins
                     
         
@@ -1267,10 +1290,10 @@ class Post_Proc_Utils_spins(Utils_spins):
             n_corr_all = np.append(n_corr_all,n_corr*n_corr_chi[i])
         return n_corr_all
     
-    def get_Rpm1(n_corr,delta_logm2_array,m1_bins,m2_bins,chi_bins,log_bin_centers):
+    def get_Rpm1(self,n_corr,delta_logm2_array,m1_bins,m2_bins,chi_bins,log_bin_centers):
         '''
         Function for computing marginal primary mass population: dR/dm1
-        (obtained by integrating dR/dm1dm2 over z and m2)
+        (obtained by integrating dR/dm1dm2dchi_eff over chi_eff and m2)
         
         Parameters
         ----------
@@ -1287,8 +1310,8 @@ class Post_Proc_Utils_spins(Utils_spins):
         m2_bins                 ::   numpy.ndarray
                                      1d array containing secondary mass bin edges
         
-        zbins                   ::   numpy.ndarray
-                                     1d array containing redshift bin edges
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
         
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
@@ -1303,7 +1326,7 @@ class Post_Proc_Utils_spins(Utils_spins):
                       1d array of dR/dm1 evaluated at the above m1 values
         
         '''
-        Rpm1 = np.array([])
+        Rpm1 = Rpm1 = np.zeros([len(n_corr),1])
         mass1 = np.array([])
         for i in range(len(m1_bins)-1):
             m1_low = m1_bins[i]
@@ -1316,11 +1339,11 @@ class Post_Proc_Utils_spins(Utils_spins):
             idx_array = np.arange(len(log_bin_centers))
             bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
                    (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
-            rate_density_array = n_corr[bin_idx]
+            rate_density_array = n_corr[:,bin_idx]
             delta_logm2s = delta_logm2_array[bin_idx]
-            Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_logm2s)/m for m in m_array])
+            Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*delta_logm2s[None,:],axis=1)[:,None]/(m_array[None,:])),axis=1)
             mass1 = np.append(mass1,m_array)
-        return mass1,Rpm1
+        return mass1,Rpm1[:,1:]
     
     def get_Rpm1_corr(self,n_corr,delta_logm2_array,delta_chi_array,m1_bins,m2_bins,log_bin_centers,chi_low,chi_high):
         '''
@@ -1345,19 +1368,19 @@ class Post_Proc_Utils_spins(Utils_spins):
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
         
-        z_low                   ::   float 
-                                     upper edge of redshift bin
+        chi_low                 ::   float 
+                                     upper edge of chi_eff bin
                                      
-        z_low                   ::   float 
-                                     upper edge of redshift bin
+        chi_low                 ::   float 
+                                     upper edge of chi_eff bin
         
         
         Returns
         -------
         mass1     :   numpy.ndarray
-                      1d array of primary masses at which p(m1|z) is evaluated
+                      1d array of primary masses at which p(m1|chi_eff) is evaluated
         Rpm1      :   numpy.ndarray
-                      1d array of p(m1|z) evaluated at the above m1 values and
+                      1d array of p(m1|chi_eff) evaluated at the above m1 values and
                       at redshifts belonging to a particular range
         
         '''
@@ -1379,10 +1402,10 @@ class Post_Proc_Utils_spins(Utils_spins):
                 mass1 = np.append(mass1,m_array)
         return mass1,Rpm1[:,1:]
         
-    def get_Rpm2(n_corr,delta_logm1_array,m1_bins,m2_bins,chi_bins,log_bin_centers):
+    def get_Rpm2(self,n_corr,delta_logm1_array,m1_bins,m2_bins,chi_bins,log_bin_centers):
         '''
-        Function for computing marginal primary mass population: dR/dm1
-        (obtained by integrating dR/dm1dm2 over z and m2)
+        Function for computing marginal primary mass population: dR/dm2
+        (obtained by integrating dR/dm1dm2chi_eff over chi_eff and m1)
         
         Parameters
         ----------
@@ -1399,8 +1422,8 @@ class Post_Proc_Utils_spins(Utils_spins):
         m2_bins                 ::   numpy.ndarray
                                      1d array containing secondary mass bin edges
         
-        zbins                   ::   numpy.ndarray
-                                     1d array containing redshift bin edges
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
         
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
@@ -1410,21 +1433,21 @@ class Post_Proc_Utils_spins(Utils_spins):
         Returns
         -------
         mass1     :   numpy.ndarray
-                      1d array of primary masses at which dRdm1 is evaluated
+                      1d array of primary masses at which dR/dm2 is evaluated
         Rpm1      :   numpy.ndarray
-                      1d array of dR/dm1 evaluated at the above m1 values
+                      1d array of dR/dm2 evaluated at the above m2 values
         
         '''
         Rpm1 = np.zeros([len(n_corr),1])
         mass1 = np.array([])
         for i in range(len(m2_bins)-1):
-            m2_low = m1_bins[i]
-            m2_high = m1_bins[i+1]
-            m1_low = m2_bins[0]
-            m1_high = m2_bins[-1]
+            m2_low = m2_bins[i]
+            m2_high = m2_bins[i+1]
+            m1_low = m1_bins[0]
+            m1_high = m1_bins[-1]
             chi_high = chi_bins[-1]
             chi_low = chi_bins[0]
-            m_array = np.linspace(m1_low,m1_high,100)[:-1]
+            m_array = np.linspace(m2_low,m2_high,100)[:-1]
             idx_array = np.arange(len(log_bin_centers))
             bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
                    (log_bin_centers[:,1]>=np.log(m2_low))&(log_bin_centers[:,1]<=np.log(m2_high))&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
@@ -1437,8 +1460,8 @@ class Post_Proc_Utils_spins(Utils_spins):
     
     def get_Rpm2_corr(self,n_corr,delta_logm1_array,delta_chi_array,m1_bins,m2_bins,log_bin_centers,chi_low,chi_high):
         '''
-        Function for computing conditional primary mass population: p(m_1|z)
-        evaluated at redshifts belonging to some range
+        Function for computing conditional primary mass population: p(m_2|chi_eff)
+        evaluated at chi_eff belonging to some range
         
         Parameters
         ----------
@@ -1458,19 +1481,19 @@ class Post_Proc_Utils_spins(Utils_spins):
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
         
-        z_low                   ::   float 
-                                     upper edge of redshift bin
+        chi_low                 ::   float 
+                                     lower edge of chi_eff bin
                                      
-        z_low                   ::   float 
+        chi_high                ::   float 
                                      upper edge of redshift bin
         
         
         Returns
         -------
-        mass1     :   numpy.ndarray
-                      1d array of primary masses at which p(m1|z) is evaluated
-        Rpm1      :   numpy.ndarray
-                      1d array of p(m1|z) evaluated at the above m1 values and
+        mass2     :   numpy.ndarray
+                      1d array of primary masses at which p(m2|z) is evaluated
+        Rpm2      :   numpy.ndarray
+                      1d array of p(m2|chi_eff) evaluated at the above m1 values and
                       at redshifts belonging to a particular range
         
         '''
@@ -1493,6 +1516,43 @@ class Post_Proc_Utils_spins(Utils_spins):
         return mass2,Rpm2[:,1:]
 
     def get_Rpchi_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,q_min,q_max):
+        '''
+        Function for computing p(chi_eff|q) for q values belonging in some range.
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dm2                     ::   numpy.ndarray
+                                     1d array of delta log(m2)'s
+        
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
+        
+                      
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        q_min                   ::   float 
+                                     lower edge of the mass-ratio range
+                                     
+        q_max                   ::   float 
+                                     upper edge of the mass-ratio range
+        
+        
+        Returns
+        -------
+        chi       :   numpy.ndarray
+                      1d array of chi_eff at which p(chi_eff|q) is evaluated
+        Rp_chi    :   numpy.ndarray
+                      1d array of p(chi_eff|q) evaluated at the above chi_eff values
+                      and at mass-ratios belonging to a particular range
+        '''
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
         ones[diag_idx]*=2.
@@ -1510,6 +1570,44 @@ class Post_Proc_Utils_spins(Utils_spins):
         return chi, Rp_chi[:,1:]
 
     def get_Rpchi_m(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
+        '''
+        Function for computing p(chi_eff|m1,m2) for either m1 or m2 values belonging in 
+        some range.
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dm2                     ::   numpy.ndarray
+                                     1d array of delta log(m2)'s
+        
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
+        
+                      
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the mass range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the mass range
+        
+        
+        Returns
+        -------
+        chi       :   numpy.ndarray
+                      1d array of chi_eff at which p(chi_eff|m1,m2) is evaluated
+        Rpm2      :   numpy.ndarray
+                      1d array of p(chi_eff|m1,m2) evaluated at the above chi_eff values
+                      and at masses belonging to a particular range
+        '''
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
         ones[diag_idx]*=2.
@@ -1532,6 +1630,44 @@ class Post_Proc_Utils_spins(Utils_spins):
         return chi, Rp_chi[:,1:]
 
     def get_Rpchi_m_complement(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
+        '''
+        Function for computing p(chi_eff|m1,m2) for both m1 and m2 values not within
+        some range.
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dm2                     ::   numpy.ndarray
+                                     1d array of delta log(m2)'s
+        
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
+        
+                      
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the mass range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the mass range
+        
+        
+        Returns
+        -------
+        chi       :   numpy.ndarray
+                      1d array of chi_eff at which p(chi_eff|m1,m2) is evaluated
+        Rp_chi    :   numpy.ndarray
+                      1d array of p(chi_eff|m1,m2) evaluated at the above chi_eff values
+                      and at masses not belonging to a particular range
+        '''
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
         ones[diag_idx]*=2.
@@ -1554,10 +1690,47 @@ class Post_Proc_Utils_spins(Utils_spins):
         return chi, Rp_chi[:,1:]
 
     def get_Rp_chi(self,chi_bins,mbins,dm1,dm2,n_corr_chi_samples,n_corr_samples,n_corr_m_samples,log_bin_centers):
+        '''
+        Function for computing p(chi_eff|m1,m2) for both m1 and m2 values not within
+        some range.
 
-        nbins_m = int(len(mbins)*(len(mbins)-1))
-        n_corr_samples_m_only_2 = n_corr_samples.copy() 
-        n_corr_samples_m_only_2[:,:nbins_m] = n_corr_m_samples
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dm2                     ::   numpy.ndarray
+                                     1d array of delta log(m2)'s
+        
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
+        
+                      
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the mass range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the mass range
+        
+        
+        Returns
+        -------
+        chi       :   numpy.ndarray
+                      1d array of chi_eff at which p(chi_eff|m1,m2) is evaluated
+        Rpm2      :   numpy.ndarray
+                      1d array of p(chi_eff|m1,m2) evaluated at the above chi_eff values
+                      and at masses not belonging to a particular range
+        '''
+        nbins_m = int(len(mbins)*(len(mbins)-1)*0.5)
+        n_corr_samples_m_only = np.zeros_like(n_corr_samples)
+        n_corr_samples_m_only[:,:nbins_m] = n_corr_m_samples
 
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dm2))
@@ -1567,13 +1740,56 @@ class Post_Proc_Utils_spins(Utils_spins):
         Rp_chi,chi = np.zeros((len(n_corr_samples),100)),np.array([ ])
         for i in range(nbins_chi):
             
-            this_Rp_chi = n_corr_chi_samples[:,i]*np.sum(n_corr_samples_m_only_2*dm1*dm2*ones,axis=-1)
+            this_Rp_chi = n_corr_chi_samples[:,i]*np.sum(n_corr_samples_m_only*dm1*dm2*ones,axis=-1)
             
             this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
             chi=np.append(chi,this_chi)
             Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
     
         return chi, Rp_chi[:,100:]
+
+    def get_pm1m2chi(self,n_corr,m1s,m2s,chis,zs,tril_edges,kappa=2.9):
+        '''
+        Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
+        m1,m2,z. Implements Eq.2 or Eq.8 of https://arxiv.org/pdf/2304.08046.pdf
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     2d array containing rate density samples in each bin
+                                     of shape (nsamples,nbins)
+                                     
+        m1s                     ::   numpy.ndarray
+                                     1d array containing values of primary mass m1 at which to evalute p(m1,m2,z)
+                                     
+        m2s                     ::   numpy.ndarray
+                                     1d array containing values of secondary mass m2 at which to evalute p(m1,m2,z)
+        
+        zs                      ::   numpy.ndarray
+                                     1d array containing values of redshift z at which to evalute p(m1,m2,z)
+        
+        tril_edges              ::   numpy.ndarray
+                                     array containing values of m1 bin edges in lower 
+                                     triangular format (output of Utils.tril_edges())
+        
+        Returns
+        -------
+        
+        p_m1m2z   : numpy.ndarray
+                    1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
+        '''
+        
+        idx_array = np.arange(len(tril_edges))
+        bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
+                   (tril_edges[:,0,1]<=m2)&(tril_edges[:,1,1]>=m2)&(tril_edges[:,0,2]<=chi)&(tril_edges[:,1,2]>=chi)] for m1,m2,chi in zip(m1s,m2s,chis)]
+       
+        idx_array = np.array([(True if len(bi)>0 else False) for bi in bin_idx])
+        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
+        n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
+        n_corr_at_idx[:,idx_array] = n_corr[:,bin_idx]
+        p_m1m2chi = n_corr_at_idx * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs)**(kappa-1))/m1s/m2s
+        return p_m1m2chi
     
 class Vt_Utils_spins(Utils_spins):    
     """
@@ -2375,5 +2591,93 @@ class Rates_spins(Utils_spins):
             N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
             log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
             n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
+            
+        return gp_model
+
+    def make_significant_model_3d_prior(self,log_bin_centers,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None):
+        '''
+        Function that creates a pymc model that will sample the posterior in 
+        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
+        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+        
+        weights                          ::    numpy.ndarray
+                                               array containing the posterior weights of each event in each bin (shape is 
+                                               n_events,nbins).
+        
+        tril_vts                         ::    numpy.ndarray
+                                               array containing mean values of emperically estimated VTs. First output of
+                                               Vt_Utils.compute_vts 
+        
+        tril_deltaLogbins                ::    numpy.ndarray
+                                               1d array containing delta_log_bin corresponding to each bin in the 
+                                               lower triangular format of the output of Utils.arraynd_to_tril
+                                               
+        ls_mean_m                        ::    float
+                                               mean of the mass axis of the lengthscale for the single GP.
+                                               
+        ls_sd_m                          ::    float
+                                               std of the mass axis of the lengthscale for the single GP..
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the redshift axis of the lengthscale for the single GP.
+                                               
+        ls_sd_z                          ::    float
+                                               std of the redshift axis of the lengthscale for the single GP.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP. Default is 10
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
+        vt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
+        
+        vt_accuracy_check                ::    bool
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
+                                               
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities posterior.
+        '''
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        nm = int(len(log_bin_centers)/nchi)
+        assert nm == len(log_bin_centers)/nchi
+        bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        log_bin_centers_m = log_bin_centers[:nm,:2]
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale_m)
+            covariance_chi = sigma*pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_m])
+            Lt = pm.gp
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, log_bin_centers_m])
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
             
         return gp_model

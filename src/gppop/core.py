@@ -1629,6 +1629,67 @@ class Post_Proc_Utils_spins(Utils_spins):
 
         return chi, Rp_chi[:,1:]
 
+
+    def get_Rpchi_m_both(self,log_bin_centers, n_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
+        '''
+        Function for computing p(chi_eff|m1,m2) for m1 and m2 values belonging in 
+        some range.
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dm2                     ::   numpy.ndarray
+                                     1d array of delta log(m2)'s
+        
+        chi_bins                ::   numpy.ndarray
+                                     1d array containing chi_eff bin edges
+        
+                      
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the mass range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the mass range
+        
+        
+        Returns
+        -------
+        chi       :   numpy.ndarray
+                      1d array of chi_eff at which p(chi_eff|m1,m2) is evaluated
+        Rpm2      :   numpy.ndarray
+                      1d array of p(chi_eff|m1,m2) evaluated at the above chi_eff values
+                      and at masses belonging to a particular range
+        '''
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dm2))
+        ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(((log_bin_centers[:,0]<=np.log(m_max))&
+                                (log_bin_centers[:,0]>=np.log(m_min)))&
+                                 ((log_bin_centers[:,1]<=np.log(m_max))&
+                                (log_bin_centers[:,1]>=np.log(m_min))))&
+                                (log_bin_centers[:,2]>=chi_bins[i])&
+                                (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dm2[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+
     def get_Rpchi_m_complement(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,m_min,m_max):
         '''
         Function for computing p(chi_eff|m1,m2) for both m1 and m2 values not within

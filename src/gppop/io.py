@@ -48,7 +48,7 @@ def read_posteriors_pesummary(event_list,nsamples):
         _posterior = pd.DataFrame()
         ff = read(event)
         samples_dict = ff.samples_dict
-        posterior_samples = samples_dict[key] if len(key)>0 else samples_dict
+        posterior_samples = samples_dict[key]
         for parameter in parameters:
             _posterior[parameter] = posterior_samples[parameter]
         posteriors.append(_posterior)
@@ -237,15 +237,11 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
             
         if m1m2_given_z_prior is not None:
             assert type(m1m2_given_z_prior) == dict
-            for i, event in enumerate(event_list):
-                prior = m1m2_given_z_prior[event]
-                assert(callable(prior))
-                pe_prior[i] = prior(posterior_samples[i,:,:])
-                
-            gppop_metadata['m1m2_given_z_prior'] = pe_prior
-        else:
-            gppop_metadata['m1m2_given_z_prior'] = pe_prior
-            pe_prior = None
+            for i, prior_func in enumerate(m1m2_given_z_prior.values()):
+                assert callabe(prior_func) or prior_func is None
+                if prior_func is not None:
+                    pe_perior[i] = prior_func(posterior_samples[i,:,:])
+        gppop_metadata['m1m2_given_z_prior'] = pe_prior
         
         inj_dataset = {}
         with h5py.File(injection_filename,'r') as hf:
@@ -265,7 +261,7 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
         gppop_metadata['total_generated'] = inj_dataset['total_generated']
         
         gp_inputs = parse_input(mbins,zbins,posterior_samples,
-                           pe_prior,inj_dataset,
+                           m1m2_given_z_prior,inj_dataset,
                            thresh,thresh_keys)
         
         gppop_metadata['posterior_weights'] = gp_inputs.weights
@@ -326,10 +322,7 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
                 injections = hf['gppop_metadata']['inj_dataset'][()]
                 thresh = hf['gppop_metadata']['thresh'][()]
                 keys = hf['gppop_metadata']['thresh_keys'][()]
-                try:
-                    keys = [k.decode('utf-8') for k in keys] 
-                except AttributeError:
-                    keys = keys.decode('utf-8')
+                keys = [k.decode('utf-8') for k in keys]
                 mbins = hf['gppop_metadata']['mbins'][()]
                 zbins = hf['gppop_metadata']['zbins'][()]
     
@@ -484,7 +477,7 @@ class output_data_products(Post_Proc_Utils):
         m1m2z_samples  : numpy.ndarray
                          array containing re-weighted posterior samples.
         '''
-        n_corr = self.n_corr_mean[:,None] if n_corr_sample is None else n_corr_sample
+        n_corr = self.n_corr_samp if n_corr_sample is None else n_corr_sample
         size = len(m1m2z_samples) if size is None else size
         z_samples = m1m2z_samples[:,2]
         dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
@@ -507,11 +500,10 @@ class output_data_products(Post_Proc_Utils):
         
         Parameters
         ----------
-         n_corr_sample      :: numpy.ndarray
-                              2d array of shape (nsamples, nbins) containing 
-                              rate density samples for each bin, 
-                              corresponding to which the population models for
-                              re-weighting are to be constructed. Default is None
+        n_corr_sample      :: numpy.ndarray
+                              1d array containing rate densities in each bin,
+                              corresponding to which the population model for
+                              re-weighting is to be constructed. Default is None
                               which implies the mean of the inferred rate density
                               samples i.e. the best fit population, will be used.
                               
@@ -530,17 +522,17 @@ class output_data_products(Post_Proc_Utils):
         z      : numpy.ndarray
                  1d array containing samples of redshift drawn from the binned population.                     
         '''
-        n_corr = self.n_corr_mean[:,None] if n_corr_sample is None else n_corr_sample
+        n_corr = self.n_corr_samples if n_corr_sample is None else n_corr_sample
         
-        m1s = np.random.uniform(min(self.mbins),max(self.mbins),size=size)
-        m2s = np.random.uniform(min(self.mbins),m1s,size=size)
-        zs = np.random.uniform(min(self.zbins),max(self.zbins),size=size)
+        m1s = np.random.uniform(min(self.mbins),max(self.mbins),size=size*50)
+        m2s = np.random.uniform(min(self.mbins),m1s,size=size*50)
+        zs = np.random.uniform(min(self.zbins),max(self.zbins),size=size*50)
         
         m1m2z_samples = np.array([m1s,m2s,zs]).T
-        p_m1m2z_pop = self.get_pm1m2z(n_corr,m1s,
-                                      m2s,zs,self.tril_edges())
+        p_m1m2z_pop = np.mean(self.get_pm1m2z(n_corr_sample,m1s,
+                                      m2s,zs,self.tril_edges()),axis=0)
         weights = p_m1m2z_pop/np.sum(p_m1m2z_pop,axis=1)[:,np.newaxis]
-        indices = np.array([np.random.choice(size,p=weights[i,:],size=size) for i in range(weights.shape[0])]).T
+        indices = np.array([np.random.choice(size*50,p=weights[i,:],size=size) for i in range(weights.shape[0])]).T
         
         return m1m2z_samples[indices,:]
     

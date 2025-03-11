@@ -1807,6 +1807,9 @@ class Utils_spins_with_q():
                   inference.
         '''
         weights = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        wgt_means = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        wgt_sigmas = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        
         m1_samples = samples[:,0]
         q_samples = samples[:,1]
         z_samples = samples[:,2]
@@ -1829,14 +1832,26 @@ class Utils_spins_with_q():
         pz_PE*=chi_prior
         pz_weight = pz_pop/pz_PE
         indices = zip(m1_indices,q_indices,chi_indices)
+        #print(inds for i,inds in enumerate(indices))
         if leftmost_chibin is None:
-            for i,inds in enumerate(indices):
+            for i,inds in enumerate(indices):                  
                     weights[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i] ** 2)
+                    wgt_means[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i] ** 2) / len(samples)
         else:
             for i,inds in enumerate(indices):
                     weights[inds[0],inds[1],inds[2]-1] += float(inds[2]>0)*pz_weight[i]/(m1_samples[i] ** 2)
+                    wgt_means[inds[0],inds[1],inds[2]] += float(inds[2]>0)*pz_weight[i]/(m1_samples[i] ** 2) / len(samples)
+        indices = zip(m1_indices,q_indices,chi_indices)
+        if leftmost_chibin is None:
+            for i,inds in enumerate(indices):
+                    wgt_sigmas[inds[0],inds[1],inds[2]] += ((pz_weight[i]/(m1_samples[i] ** 2)) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2) 
+            
+        else:
+            for i,inds in enumerate(indices):
+                    wgt_sigmas[inds[0],inds[1],inds[2]] += float(inds[2]>0)*((pz_weight[i]/(m1_samples[i] ** 2)) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2) 
+        wgt_sigmas = np.sqrt(wgt_sigmas)
        # weights /= sum(sum(sum(weights)))
-        return weights
+        return weights, wgt_means, wgt_sigmas
 
     def deltaLogbin_with_q(self):
         '''
@@ -1881,9 +1896,7 @@ class Utils_spins_with_q():
         for i in range(len(m1)-1):
             for j in range(len(q)-1):
                 for k in range(len(chi)-1):
-                    if(q[j]>m1[i]):
-                        continue
-                    edge_array.append([[m1[i],m2[j],chi[k]],[m1[i+1],m2[j+1],chi[k+1]]])
+                    edge_array.append([[m1[i],q[j],chi[k]],[m1[i+1],q[j+1],chi[k+1]]])
         return np.array(edge_array)
 
     def generate_log_bin_centers_with_q(self):
@@ -2269,6 +2282,66 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
                 #print(mass1)
         print(mass1.shape, Rpm1.shape)
         return mass1,Rpm1[:,1:]
+    
+    def get_Rpm1_qchi_corr_with_q(self,n_corr,delta_q_array,delta_chi_array,m1_bins,chi_bins,log_bin_centers,q_low,q_high,chi_low,chi_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_q_array       ::   numpy.ndarray
+                                     1d array of delta q's
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing mass ratio bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpm1 = np.zeros([len(n_corr),1])
+        mass1 = np.array([])
+        for i in range(len(m1_bins)-1):
+                m1_low = m1_bins[i]
+                m1_high = m1_bins[i+1]
+                #chi_low = chi_bins[0]
+                #chi_high = chi_bins[-1]
+                m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_qs = delta_q_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*((delta_qs*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:])),axis=1)
+                mass1 = np.append(mass1,m_array)
+                #mass1 = mass1.append(m_array)
+                #print(mass1)
+        print(mass1.shape, Rpm1.shape)
+        return mass1,Rpm1[:,1:]
         
     def get_Rpq_with_q(n_corr,delta_logm1_array,m1_bins,q_bins,chi_bins,log_bin_centers):
         '''
@@ -2388,6 +2461,67 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
                 mrat = np.append(mrat,q_array)
         print(Rpq.shape)
         return mrat,Rpq[:,1:]
+    
+    def get_Rpq_corr_m1chi_with_q(self, n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,m1_low,m1_high,chi_low,chi_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_logq_array       ::   numpy.ndarray
+                                     1d array of delta log(q)'s
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpq = np.zeros([len(n_corr),1])
+        mrat = np.array([])
+        for i in range(len(q_bins)-1):
+                #m1_low = m1_bins[0]
+                #m1_high = m1_bins[-1]
+                q_low = q_bins[i]
+                q_high = q_bins[i+1]
+                #m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                m_array = np.ones(99)
+                q_array = np.linspace(q_low,q_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_logm1s = delta_logm1_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpq = np.concatenate((Rpq,(np.sum(rate_density_array*((delta_logm1s*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:]))),axis=1)
+
+                mrat = np.append(mrat,q_array)
+        print(Rpq.shape)
+        return mrat,Rpq[:,1:]
 
     def get_Rpchi_q_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,q_min,q_max):
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
@@ -2465,6 +2599,50 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
             Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
 
         return chi, Rp_chi[:,1:]
+    
+    def get_Rpchi_mq_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,m_min,m_max, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(((log_bin_centers[:,0]<=np.log(m_max))&
+                                (log_bin_centers[:,0]>=np.log(m_min))))&
+                                (log_bin_centers[:,1]>=q_min)&
+                                (log_bin_centers[:,1]<=q_max)&
+                                (log_bin_centers[:,2]>=chi_bins[i])&
+                                (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+
+    def get_Rpchi_mq_complement_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,m_min,m_max, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(~(((log_bin_centers[:,0]<=np.log(m_max))&
+                        (log_bin_centers[:,0]>=np.log(m_min)))))&
+                        (log_bin_centers[:,1]>=q_min)&
+                        (log_bin_centers[:,1]<=q_max)&        
+                        (log_bin_centers[:,2]>=chi_bins[i])&
+                        (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
 
     def get_Rp_chi_with_q(chi_bins,mbins,qbins,dm1,dq,n_corr_chi_samples,n_corr_samples,n_corr_m_samples,n_corr_q_samples,log_bin_centers):
 
@@ -2490,6 +2668,53 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
             Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
 
         return chi, Rp_chi[:,100:]
+    
+    def get_pm1qchi(self,n_corr,m1s,qs,chis,zs,tril_edges):
+        '''
+        Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
+        m1,m2,z. Implements Eq.2 or Eq.8 of https://arxiv.org/pdf/2304.08046.pdf
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     2d array containing rate density samples in each bin
+                                     of shape (nsamples,nbins)
+                                     
+        m1s                     ::   numpy.ndarray
+                                     1d array containing values of primary mass m1 at which to evalute p(m1,m2,z)
+                                     
+        m2s                     ::   numpy.ndarray
+                                     1d array containing values of secondary mass m2 at which to evalute p(m1,m2,z)
+        
+        zs                      ::   numpy.ndarray
+                                     1d array containing values of redshift z at which to evalute p(m1,m2,z)
+        
+        tril_edges              ::   numpy.ndarray
+                                     array containing values of m1 bin edges in lower triangular format
+                                     (output of Utils.tril_edges() function)
+        
+        Returns
+        -------
+        
+        p_m1m2z   : numpy.ndarray
+                    1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
+        '''
+        dl_values = Planck15.luminosity_distance(zs).to(u.Gpc).value
+        idx_array = np.arange(len(tril_edges))
+        
+        bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
+                   (tril_edges[:,0,1]<=q)&(tril_edges[:,1,1]>=q)&(tril_edges[:,0,2]<=chi)&(tril_edges[:,1,2]>=chi)] for m1,q,chi in zip(m1s,qs,chis)]
+        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
+        n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
+        n_corr_at_idx[:,bin_idx] = n_corr[:,bin_idx]
+        
+        ddL_dz = dl_values/(1+zs) + (1+zs)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(zs)#Jacobian to convert from dL to z 
+        pz_PE = (1+zs)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+            
+        p_m1m2z = n_corr_at_idx * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))/pz_PE/(m1s ** 2)
+        return p_m1m2z
+    
     
 class Vt_Utils_spins_with_q(Utils_spins_with_q):    
     """
@@ -3747,9 +3972,9 @@ class Rates_spins_with_q(Utils_spins_with_q):
         #assert nm == len(log_bin_centers)/nchi
         #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
         #log_bin_centers_m = log_bin_centers[:nm,:2]
-        bin_centers_chi = log_bin_centers[0::(nm * nq),2][:,None]
-        bin_centers_q = log_bin_centers[0:nq, 1][:,None]
-        log_bin_centers_m = log_bin_centers[0:nm * nq: nq, 0][:,None]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
         #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
         
         with pm.Model() as gp_model:

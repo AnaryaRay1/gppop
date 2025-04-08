@@ -1044,7 +1044,7 @@ class Utils_spins():
             if not O4_prior:
                 pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
             else : 
-                pz_PE = m1m2_given_z_prior * Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z) # m1m2_given_z_prior * dl_values**2 * ddL_dz
+                pz_PE = m1m2_given_z_prior * Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples) # m1m2_given_z_prior * dl_values**2 * ddL_dz
             pz_PE*=chi_prior
         else:
             pz_PE=full_prior

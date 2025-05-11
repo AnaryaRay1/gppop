@@ -126,7 +126,7 @@ def read_posteriors_h5py(event_list,nsamples,parameter_translator = dict(
     return posterior_samples_allevents
 
 
-def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, injection_keys, thresh, thresh_keys, include_spins = True, event_dict = None, parameter_translator_dict = None, pe_summary_event_dict = None, m1m2_given_z_prior = None, analysis_type = 'uncor'):
+def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, injection_keys, thresh, thresh_keys, include_spins = True, event_dict = None, parameter_translator_dict = None, pe_summary_event_dict = None, m1m2_given_z_prior = None, analysis_type = 'uncor',meta_file_with_pe=None):
         """
         Function for creating popsummary compatible meta-file containing all gppop-inputs
         
@@ -207,28 +207,34 @@ def create_metafile(mbins,zbins,metafilename, n_pe_samples, injection_filename, 
                               'uncor'
         
         """
-        assert (event_dict is not None) or (pe_summary_event_dict is not None)
-        
-        event_list , waveform_list, path_list, posterior_samples  = [ ], [ ], [ ], None
-        if event_dict is not None:
-            for event, content in event_dict.items():
-                event_list.append(event)
-                waveform_list.append(content[0])
-                path_list.append(content[1])
-            
-            posterior_samples = read_posteriors_h5py([[w,p] for [w,p] in event_dict.values()], n_pe_samples, parameter_translator_dict = parameter_translator_dict) if parameter_translator_dict is not None else read_posteriors_h5py([[w,p] for [w,p] in event_dict.values()],n_pe_samples)
-        
-        if pe_summary_event_dict is not None:
-            for event, content in pe_summary_event_dict.items():
-                event_list.append(event)
-                waveform_list.append(content[0])
-                path_list.append(content[1])
+        if meta_file_with_pe is None:
+            assert (event_dict is not None) or (pe_summary_event_dict is not None)
 
-            pe_summary_event_samples = read_posteriors_pesummary([[w,p] for [w,p] in pe_summary_event_dict.values()],n_pe_samples)
-            posterior_samples = np.concatenate((posterior_samples,pe_summary_event_samples), axis = 0) if posterior_samples is not None else pe_summary_event_samples
-            
-        popsummary = popresult.PopulationResult(fname = metafilename, events = event_list, event_waveforms = waveform_list, event_sample_IDs = np.arange(len(event_list)), event_parameters = ['m1','m2','z'],model_names = [f'gppop_{analysis_type}'], references = ['https://arxiv.org/abs/2304.08046'])
+            event_list , waveform_list, path_list, posterior_samples  = [ ], [ ], [ ], None
+            if event_dict is not None:
+                for event, content in event_dict.items():
+                    event_list.append(event)
+                    waveform_list.append(content[0])
+                    path_list.append(content[1])
+
+                posterior_samples = read_posteriors_h5py([[w,p] for [w,p] in event_dict.values()], n_pe_samples, parameter_translator_dict = parameter_translator_dict) if parameter_translator_dict is not None else read_posteriors_h5py([[w,p] for [w,p] in event_dict.values()],n_pe_samples)
+
+            if pe_summary_event_dict is not None:
+                for event, content in pe_summary_event_dict.items():
+                    event_list.append(event)
+                    waveform_list.append(content[0])
+                    path_list.append(content[1])
+
+                pe_summary_event_samples = read_posteriors_pesummary([[w,p] for [w,p] in pe_summary_event_dict.values()],n_pe_samples)
+                posterior_samples = np.concatenate((posterior_samples,pe_summary_event_samples), axis = 0) if posterior_samples is not None else pe_summary_event_samples
+
+            popsummary = popresult.PopulationResult(fname = metafilename, events = event_list, event_waveforms = waveform_list, event_sample_IDs = np.arange(len(event_list)), event_parameters = ['m1','m2','z'],model_names = [f'gppop_{analysis_type}'], references = ['https://arxiv.org/abs/2304.08046'])
         
+        else:
+            with h5py.File(meta_file_with_pe,'r') as hf:
+                posterior_samples = hf['gppop_metadata']['unweighted_event_samples'][()]
+                popsummary = popresult.PopulationResult(fname = meta_file_with_pe)
+    
         gppop_metadata = {}
         gppop_metadata['mbins'] = mbins
         gppop_metadata['zbins'] = zbins
@@ -348,7 +354,7 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
             
             hyper_samples = np.concatenate((gp_output.lambda_m_samples, gp_output.lambda_z_samples, gp_output.sigma_samples, gp_output.mu_samples,gp_output.n_corr_samples),axis = 1)
             popsummary.set_hyperparameter_samples(hyper_samples,overwrite = overwrite, group = group)
-                
+            '''    
             reweighted_pe_samples = np.zeros([pe_samples.shape[0], n_draw_pe, gp_output.N_samples, pe_samples.shape[-1]])
             for i in range(pe_samples.shape[0]):
                 print(f"re-weighting {i}th event's pe samples using hyper-{group}")
@@ -368,7 +374,7 @@ def write_results_to_metafile(metafilename,trace_file_posterior,trace_file_prior
             fair_draws = gp_output.posterior_predictive_samples(n_corr_sample=gp_output.n_corr_samples, size=n_draw_pred)
             popsummary.set_fair_population_draws(fair_draws, overwrite=overwrite, group=group)
             fair_draws = [ ]
-            
+            '''
             if analysis_type == 'uncor':
                 print(f'computing marginal rate densities on grid for hyper-{group}')
                 Z,Rz,m1,Rpm1,m2,Rpm2 = gp_output.marginal_distributions_grid()
@@ -657,7 +663,7 @@ class output_data_products(Post_Proc_Utils):
                 mass1,p = self.get_Rpm1_corr(n_corr_sample, dm2,self.mbins, self.mbins, log_bin_centers,self.zbins[j],self.zbins[j+1])
                 Rpm1_z.append(p)
                 
-                mass2,p = self.get_Rpm2_corr(n_corr_sample,dm2,self.mbins,log_bin_centers,self.zbins[j], self.zbins[j+1])
+                mass2,p = self.get_Rpm2_corr(n_corr_sample,dm1,self.mbins,log_bin_centers,self.zbins[j], self.zbins[j+1])
                 Rpm2_z.append(p)
             R_pm1.append(Rpm1_z)
             R_pm2.append(Rpm2_z)
@@ -798,6 +804,7 @@ class parse_input(Vt_Utils):
         self.tril_deltaLogbin = self.arraynd_to_tril(self.deltaLogbin())
         
         self.compute_all_weights()
+        print('computing vts')
         self.compute_all_vts()
         
     def compute_all_weights(self):

@@ -657,7 +657,7 @@ class output_data_products(Post_Proc_Utils):
                 mass1,p = self.get_Rpm1_corr(n_corr_sample, dm2,self.mbins, self.mbins, log_bin_centers,self.zbins[j],self.zbins[j+1])
                 Rpm1_z.append(p)
                 
-                mass2,p = self.get_Rpm2_corr(n_corr_sample,dm2,self.mbins,log_bin_centers,self.zbins[j], self.zbins[j+1])
+                mass2, p = self.get_Rpm2_corr(n_corr_sample, dm1, self.mbins, log_bin_centers, self.zbins[j], self.zbins[j+1])
                 Rpm2_z.append(p)
             R_pm1.append(Rpm1_z)
             R_pm2.append(Rpm2_z)

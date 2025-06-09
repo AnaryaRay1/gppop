@@ -12,6 +12,7 @@ from astropy.cosmology import Planck15,z_at_value
 from astropy import units as u
 from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
+from tqdm import tqdm
 import warnings
 
 ############################
@@ -921,11 +922,11 @@ class Vt_Utils(Utils):
         else:
             selector=np.where(inj_data_set[key]>=thresh)[0]
         
-        log_pinjs = np.array(list(map(self.log_reweight_pinjection_mixture,inj_data_set['mass1_source'][selector],inj_data_set['mass2_source'][selector],inj_data_set['redshift'][selector], inj_data_set['spin1x'][selector],inj_data_set['spin1y'][selector],inj_data_set['spin1z'][selector], inj_data_set['spin2x'][selector],inj_data_set['spin2y'][selector], inj_data_set['spin2z'][selector],inj_data_set['sampling_pdf'][selector], inj_data_set['mixture_weight'][selector])))
+        log_pinjs = np.array(list(map(self.log_reweight_pinjection_mixture,tqdm(inj_data_set['mass1_source'][selector]),inj_data_set['mass2_source'][selector],inj_data_set['redshift'][selector], inj_data_set['spin1x'][selector],inj_data_set['spin1y'][selector],inj_data_set['spin1z'][selector], inj_data_set['spin2x'][selector],inj_data_set['spin2y'][selector], inj_data_set['spin2z'][selector],inj_data_set['sampling_pdf'][selector], inj_data_set['mixture_weight'][selector])))
         
-        vt_means = np.sum(np.array(list(map(reweight_pinjection,log_pinjs))),axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))/inj_data_set['total_generated']
+        vt_means = np.sum(np.array(list(map(reweight_pinjection,tqdm(log_pinjs)))),axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))/inj_data_set['total_generated']
         
-        vt_vars = np.sum(np.array(list(map(reweight_pinjection,log_pinjs)))**2,axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))**2/inj_data_set['total_generated']**2 - vt_means**2/inj_data_set['total_generated']
+        vt_vars = np.sum(np.array(list(map(reweight_pinjection,tqdm(log_pinjs))))**2,axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))**2/inj_data_set['total_generated']**2 - vt_means**2/inj_data_set['total_generated']
         
         vt_sigmas = np.sqrt(vt_vars)
         

@@ -2669,32 +2669,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
         return chi, Rp_chi[:,100:]
     
-    
     def get_pm1qchi(self,n_corr,n_sum_bin, m1s,qs,chis,zs,tril_edges, chi_prior = None):
-        dl_values = Planck15.luminosity_distance(zs).to(u.Gpc).value
-        idx_array = np.arange(len(tril_edges))
-        #print(len(tril_edges))
-        bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
-                   (tril_edges[:,0,1]<=q)&(tril_edges[:,1,1]>=q)&(tril_edges[:,0,2]<=chi)&(tril_edges[:,1,2]>=chi)] for m1,q,chi in zip(m1s,qs,chis)]
-        index_array = np.array([i for i, bi in enumerate(bin_idx) if len(bi)>0])
-        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
-        n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
-    
-        n_corr_at_idx[:, index_array] = n_corr[:,bin_idx]
-        
-        
-        print(n_corr_at_idx.shape)
-        
-        ddL_dz = dl_values/(1+zs) + (1+zs)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(zs)#Jacobian to convert from dL to z 
-        pz_PE = (1+zs)**2 * dl_values**2 * ddL_dz * chi_prior # default PE prior - flat in det frame masses and dL**2 in distance
-        #print(pz_PE.shape) 
-        
-        pm1qchi = np.dot(n_corr_at_idx.T , 1/n_sum_bin) * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs) ** (self.kappa - 1))/pz_PE/(m1s ** 2)
-        return pm1qchi
-        
-        
-    
-    def get_re_wt_m1qchi(self,n_corr,n_sum_bin, m1s,qs,chis,zs,tril_edges, chi_prior = None):
         '''
         Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
         m1,m2,z. Implements Eq.2 or Eq.8 of https://arxiv.org/pdf/2304.08046.pdf
@@ -2743,8 +2718,8 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         pz_PE = (1+zs)**2 * dl_values**2 * ddL_dz * chi_prior # default PE prior - flat in det frame masses and dL**2 in distance
         #print(pz_PE.shape) 
         
-        re_wt_m1qchi = np.dot(n_corr_at_idx.T , 1/n_sum_bin) * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs) ** (self.kappa - 1))/pz_PE/(m1s ** 2)/len(n_corr)
-        return re_wt_m1qchi
+        p_m1qchi = np.dot(n_corr_at_idx.T , 1/n_sum_bin) * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs) ** (self.kappa - 1))/pz_PE/(m1s ** 2)/len(n_corr)
+        return p_m1qchi
     
     
 class Vt_Utils_spins_with_q(Utils_spins_with_q):    
@@ -3741,7 +3716,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
         return gp_model
     
     
-    def make_gp_prior_model_3d_evolution_only(self,log_bin_centers, ls_mean_m, ls_sd_m,ls_mean_chi, ls_sd_chi, sigma_sd=1.,mu_chi_dim=None):
+    def make_gp_prior_model_3d_evolution_only(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
         '''
         Function that creates a pymc model for sampling rate-densities
         from the GP priors in Eqs. 9,10.
@@ -3779,32 +3754,58 @@ class Rates_spins_with_q(Utils_spins_with_q):
                     model object for sampling the rate densities prior.
         
         '''
-        nz= len(self.zbins)-1
-        nm = int(len(log_bin_centers)/nz)
-        assert nm == len(log_bin_centers)/nz
-        z_bin_centers = log_bin_centers[0::nm,2][:,None]
-        logm_bin_centers = log_bin_centers[:nm,:2]
-        if mu_z_dim is None:
-            mu_z_dim=nz
-        assert mu_z_dim ==1 or mu_z_dim == nz
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
+        #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
+        
         with pm.Model() as gp_model:
-            mu = pm.Normal('mu',mu=0,sigma=10,shape=nm)
-            mu_z = pm.Normal('mu_z',mu=0,sigma=1,shape=mu_z_dim)
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
-            sigma_z = 1.
-            length_scale = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
-            length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
-            covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
-            covariance_z = sigma_z**2*pm.gp.cov.ExpQuad(1,ls=length_scale_z)
-            gp = pm.gp.Latent(cov_func=covariance)
-            gp_z = pm.gp.Latent(cov_func=covariance_z)
-            logn_corr = gp.prior('logn_corr',X=logm_bin_centers)
-            logn_corr_z = gp_z.prior('logn_corr_z',X=z_bin_centers)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
+            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
+            #print(np.array([bin_centers_chi, log_bin_centers_m, bin_centers_q]).shape[0])
+            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_q, covariance_m])
+            #covariance = sigma ** 2 * pm.gp.cov.ExpQuad(input_dim = 3, ls = [length_scale_m, length_scale_q, length_scale_chi])
+            #gp = pm.gp.Latent(cov_func = covariance)
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, bin_centers_q, log_bin_centers_m])
+            #logn_corr = gp.prior('logn_corr', X = log_bin_centers)
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
-            logn_tot_z = pm.Deterministic('logn_tot_z', mu_z+logn_corr_z)
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
-            n_corr_z = pm.Deterministic('n_corr_z',tt.exp(logn_tot_z))
-            
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+           # log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
         return gp_model
     
     def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
@@ -4033,8 +4034,8 @@ class Rates_spins_with_q(Utils_spins_with_q):
             
         return gp_model
         
-    
-    def make_significant_model_3d_with_q_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None):
+        
+    def make_significant_model_3d_with_q_cut(self,log_bin_centers, arg_mat_spin,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
         '''
         Function that creates a pymc model that will sample the posterior in 
         Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
@@ -4128,7 +4129,126 @@ class Rates_spins_with_q(Utils_spins_with_q):
         log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
         #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
         
-        Neff_samp = []
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
+            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
+            #print(np.array([bin_centers_chi, log_bin_centers_m, bin_centers_q]).shape[0])
+            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_q, covariance_m])
+            #covariance = sigma ** 2 * pm.gp.cov.ExpQuad(input_dim = 3, ls = [length_scale_m, length_scale_q, length_scale_chi])
+            #gp = pm.gp.Latent(cov_func = covariance)
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, bin_centers_q, log_bin_centers_m])
+            #logn_corr = gp.prior('logn_corr', X = log_bin_centers)
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot) * arg_mat_spin)
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
+            n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
+            
+        return gp_model    
+        
+        
+    def make_significant_model_3d_with_q_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None):
+        '''
+        Function that creates a pymc model that will sample the posterior in 
+        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
+        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+        
+        weights                          ::    numpy.ndarray
+                                               array containing the posterior weights of each event in each bin (shape is 
+                                               n_events,nbins).
+        
+        tril_vts                         ::    numpy.ndarray
+                                               array containing mean values of emperically estimated VTs. First output of
+                                               Vt_Utils.compute_vts 
+        
+        tril_deltaLogbins                ::    numpy.ndarray
+                                               1d array containing delta_log_bin corresponding to each bin in the 
+                                               lower triangular format of the output of Utils.arraynd_to_tril
+                                               
+        ls_mean_m                        ::    float
+                                               mean of the mass axis of the lengthscale for the single GP.
+                                               
+        ls_sd_m                          ::    float
+                                               std of the mass axis of the lengthscale for the single GP..
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the redshift axis of the lengthscale for the single GP.
+                                               
+        ls_sd_z                          ::    float
+                                               std of the redshift axis of the lengthscale for the single GP.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP. Default is 10
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
+        vt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
+        
+        vt_accuracy_check                ::    bool
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
+                                               
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities posterior.
+        '''
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            wt_means = wt_means[:,np.where(arg)[0]]
+            wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
         
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
@@ -4151,21 +4271,11 @@ class Rates_spins_with_q(Utils_spins_with_q):
             n_f_exp = n_corr_physical*tril_vts
             N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
             log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
-            Ndet = np.dot(n_corr_physical, tril_vts)  
-            for this_n_corr in n_corr_physical: 
-            	#print(
-            	denominator = np.sum((wt_sigmas*this_n_corr[None,:])**2, axis =-1)
-            	numerator = np.dot(wt_means, this_n_corr)**2
-            	Neff_samp.append(min(numerator/denominator))
-
-            Neff_samp_arr = np.array(Neff_samp)
-            
+            Ndet =  pm.Deterministic('Ndet', tt.sum(n_f_exp, axis = -1))  #np.dot(n_corr_physical, tril_vts)
+            denominator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
+            numerator = tt.dot(wt_means, n_corr_physical)**2
+            N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
             #n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
-            n_eff_potential = pm.Potential('n_eff_potential', -np.log1p((n_eff/(2 * Ndet)) ** (-30)) -np.log1p((np.log10(Neff_samp_arr)/0.6) ** (-30)))
+            n_eff_potential = pm.Potential('n_eff_potential', -tt.log1p((n_eff/(2 * Ndet)) ** (-44)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (-44)))
             
-        return gp_model        
-        
-    
-        
-        
-       
+        return gp_model         

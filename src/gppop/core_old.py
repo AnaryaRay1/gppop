@@ -1732,6 +1732,1158 @@ class Vt_Utils_spins(Utils_spins):
         vt_sigmas = np.sqrt(vt_vars)
         
         return vt_means, vt_sigmas
+    
+class Utils_spins_with_q():
+    """
+    Utilities for GP rate inference. Contains 
+    functions for binning up the m1,m2,z or m1,m2 only
+    parameter spaces, and computing various attributes 
+    of bins and posterior weights in bins.
+    """
+    
+    def __init__(self,mbins,qbins,chi_bins,kappa=2.7):
+        '''
+        Initialize utilities class.
+        
+        Parameters
+        ----------
+        
+        mbins :: numpy.ndarray 
+                 1d array containing mass bin edges
+        
+        zbins :: numpy.ndarray
+                 1d array containing redshift bin edges.
+        
+        '''
+        self.mbins = mbins
+        self.chi_bins = chi_bins
+        self.qbins = qbins
+        self.kappa=kappa
+    
+    def arraynd_to_tril(self,arr):
+        '''
+        Function that returns the set of lower-triangular
+        entries (m2<=m1) of a collection of 2d matrices
+        each binned by m1 and m2. For the m1,m2,z inference,
+        it returns multiple sets of lower triangular (m2<=m1) 
+        entries, one set corresponding to each redshift bin.
+        Uses numpy's tril_indices function.
+
+        Parameters
+        ----------
+        arr :: numpy.ndarray
+               Input 2d or 3d matrix.
+
+        Returns
+        -------
+        lower_tri_array : numpy.ndarray
+                          Array of lower-triangular entries.
+        '''
+        return np.matrix.flatten(arr)
+
+    def compute_weights_with_q(self, samples,m1m2_given_z_prior=None,chi_prior=None,leftmost_chibin=None):
+        '''
+        Function to compute the weights needed to reweight
+        posterior samples to the population distribution,
+        for an event in parameter bins. This implements Equation
+        A.1 of https://arxiv.org/pdf/2304.08046.pdf.
+
+        Parameters
+        ----------
+        samples            :: numpy.ndarray
+                              Array of m1,m2,z posterior samples.
+                              
+        m1m2_given_z_prior :: numpy.ndarray
+                              if default PE priors were not used then
+                              the values of the p(m_1,m_2|z) function used
+                              in PE need to be supplied corresponding to
+                              each posterior sample.
+        
+        Returns
+        -------
+        weights : numpy.ndarray
+                  The weight matrix of shape(mbins,mbins) for m1,m2 only 
+                  inference and of shape(mbins,mbins,zbins) for m1,m2,z
+                  inference.
+        '''
+        weights = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        wgt_means = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        wgt_sigmas = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        
+        m1_samples = samples[:,0]
+        q_samples = samples[:,1]
+        z_samples = samples[:,2]
+        chi_samples = samples[:,3]
+        #uniform in comoving-volume
+        dl_values = Planck15.luminosity_distance(z_samples).to(u.Gpc).value
+        m1_indices = np.clip(np.searchsorted(self.mbins,m1_samples,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
+        q_indices = np.clip(np.searchsorted(self.qbins,q_samples,side='right') - 1,a_min=0,a_max=len(self.qbins)-2)
+        if leftmost_chibin is None:
+            chi_indices = np.clip(np.searchsorted(self.chi_bins,chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-2)
+        else:
+            chi_indices = np.clip(np.searchsorted(np.append([leftmost_chibin], self.chi_bins),chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-1)
+            
+        pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value*((1+z_samples)**(self.kappa-1))
+        ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
+        if m1m2_given_z_prior is None:
+            pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+        else : 
+            pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
+        pz_PE*=chi_prior
+        pz_weight = pz_pop/pz_PE
+        indices = zip(m1_indices,q_indices,chi_indices)
+        #print(inds for i,inds in enumerate(indices))
+        if leftmost_chibin is None:
+            for i,inds in enumerate(indices):                  
+                    weights[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i] ** 2)
+                    wgt_means[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i] ** 2) / len(samples)
+        else:
+            for i,inds in enumerate(indices):
+                    weights[inds[0],inds[1],inds[2]-1] += float(inds[2]>0)*pz_weight[i]/(m1_samples[i] ** 2)
+                    wgt_means[inds[0],inds[1],inds[2]] += float(inds[2]>0)*pz_weight[i]/(m1_samples[i] ** 2) / len(samples)
+        indices = zip(m1_indices,q_indices,chi_indices)
+        if leftmost_chibin is None:
+            for i,inds in enumerate(indices):
+                    wgt_sigmas[inds[0],inds[1],inds[2]] += ((pz_weight[i]/(m1_samples[i] ** 2)) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2) 
+            
+        else:
+            for i,inds in enumerate(indices):
+                    wgt_sigmas[inds[0],inds[1],inds[2]] += float(inds[2]>0)*((pz_weight[i]/(m1_samples[i] ** 2)) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2) 
+        wgt_sigmas = np.sqrt(wgt_sigmas)
+       # weights /= sum(sum(sum(weights)))
+        return weights, wgt_means, wgt_sigmas
+
+    def deltaLogbin_with_q(self):
+        '''
+        Function that returns the deltaLogbin for each bin.
+
+        Returns
+        -------
+        deltaLogbin_array : numpy.ndarray
+                            n-D array providing deltaLogbin for each bin.
+        '''
+        m1 = self.mbins
+        q = self.qbins
+        chi = self.chi_bins
+        deltaLogbin_array = np.ones([len(m1)-1,len(q)-1,len(chi)-1])
+        
+        for k in range(len(chi)-1):
+            for i in range(len(m1)-1):
+                for j in range(len(q)-1):
+                    if j != i:
+                        deltaLogbin_array[i,j,k] = np.log(m1[i+1]/m1[i])*(q[j+1] - q[j])*(chi[k+1]-chi[k])
+                    elif j==i:
+                        #deltaLogbin_array[i,i,k] = 0.5*np.log(m1[i+1]/m1[i])*(q[j+1] - q[j])*(chi[k+1]-chi[k])
+                        deltaLogbin_array[i,i,k] = np.log(m1[i+1]/m1[i])*(q[j+1] - q[j])*(chi[k+1]-chi[k])
+        return deltaLogbin_array
+    
+    def tril_edges(self):
+        '''
+        A function that returns the m1,m2,z edges of each bin
+        (or m1,m2 edges for mass-only inference) in the form of 
+        the output of arraynd_to_tril()
+        
+        Returns
+        -------
+        edge_array : numpy.ndarray
+                     an array containing upper and lower edges for each 
+                     bin.
+        '''
+        m1 = self.mbins
+        q = self.qbins
+        chi = self.chi_bins
+        edge_array = []
+        for i in range(len(m1)-1):
+            for j in range(len(q)-1):
+                for k in range(len(chi)-1):
+                    edge_array.append([[m1[i],q[j],chi[k]],[m1[i+1],q[j+1],chi[k+1]]])
+        return np.array(edge_array)
+
+    def generate_log_bin_centers_with_q(self):
+        '''
+        Function that returns n-D bin centers in logm1,logm2,z space.
+
+        Returns
+        -------
+        log_lower_tri_sorted : numpy.ndarray
+                               n-D array of the  bin centers in logm1 space and
+                               redshift bins in linear space.
+        '''
+        # zbins = np.log(self.zbins+1.0e-300)
+#         for k in range(len(self.chi_bins)-1):
+#             log_m1 = np.log(self.mbins)
+#             log_m2 = np.log(self.mbins)
+#             nbin = len(log_m1) - 1
+#             nbin2 = len(self.qbins) - 1
+#             logm1_bin_centres = np.asarray([0.5*(log_m1[i+1]+log_m1[i])for i in range(nbin)])
+#             logm2_bin_centres = np.asarray([0.5*(log_m2[i+1]+log_m2[i])for i in range(nbin)])
+#             #l1, l5 = np.meshgrid(logm1_bin_centres, logm2_bin_centres)
+#             q_bin_centres = np.asarray([0.5*(self.qbins[j+1]+self.qbins[j]) for j in range(nbin2)])
+#             l1, l2 = np.meshgrid(logm1_bin_centres, q_bin_centres)
+#             l3 = np.array([[0.5*(self.chi_bins[k+1]+self.chi_bins[k])] for i in range(nbin*nbin2)])
+#             logM = np.concatenate((l1.reshape([nbin*nbin2,1]),l2.reshape([nbin*nbin2,1]),l3),axis=1)
+#             logM_lower_tri = np.asarray([a for a in logM if a[1]<=a[0]])
+#             #logM_lower_tri = logM
+#             logM_lower_tri_sorted = np.asarray([logM_lower_tri[i] for i in np.argsort(logM_lower_tri[:,0],kind='mergesort')])
+#             if k == 0:
+#                 log_lower_tri_sorted = logM_lower_tri_sorted
+#             else:
+#                 log_lower_tri_sorted=np.append(log_lower_tri_sorted, logM_lower_tri_sorted,axis =0)
+#         return log_lower_tri_sorted
+        for k in range(len(self.mbins)-1):
+            nbin2 = len(self.chi_bins) - 1
+            nbin = len(self.qbins) - 1
+            chi_bin_centres = np.asarray([0.5*(self.chi_bins[i+1]+self.chi_bins[i])for i in range(nbin2)])
+            #l1, l5 = np.meshgrid(logm1_bin_centres, logm2_bin_centres)
+            q_bin_centres = np.asarray([0.5*(self.qbins[j+1]+self.qbins[j]) for j in range(nbin)])
+            l1, l2 = np.meshgrid(chi_bin_centres, q_bin_centres)
+            l3 = np.array([[0.5*(np.log(self.mbins[k+1])+np.log(self.mbins[k]))] for i in range(nbin*nbin2)])
+            logM = np.concatenate((l3,l2.reshape([nbin*nbin2,1]),l1.reshape([nbin*nbin2,1])),axis=1)
+            logM_lower_tri = np.asarray([a for a in logM if a[1]<=a[0]])
+            #logM_lower_tri = logM
+            logM_lower_tri_sorted = np.asarray([logM_lower_tri[i] for i in np.argsort(logM_lower_tri[:,0],kind='mergesort')])
+            if k == 0:
+                log_lower_tri_sorted = logM_lower_tri_sorted
+            else:
+                log_lower_tri_sorted=np.append(log_lower_tri_sorted, logM_lower_tri_sorted,axis =0)
+        return log_lower_tri_sorted
+            
+                
+    def construct_1dtond_matrix_with_q(self,nbins_m,values,nbins_chi, nbins_q, tril=True):
+        '''
+        Inverse of arraynd_to_tril() Returns a n-D
+        represenation matrix of a given set of the lower
+        triangular 1-D values or multiple sets of lower 
+        triangular 1D values, one set corresponding to 
+        each redshift bin.
+
+        Parameters
+        ----------
+        values : numpy.ndarray
+            1-D array of lower triangular entries.
+        nbins_m : int
+            number of mass bins
+        nbins_z : int
+            number of redshift bins
+            
+        Returns
+        -------
+        matrix : numpy.ndarray
+            n-D symmetric array using values.
+        '''
+        k=0
+        if len(values.shape)>1:
+            matrix = np.zeros((nbins_m,nbins_q,nbins_chi)+values.shape[1:])
+        else:
+            matrix = np.zeros((nbins_m,nbins_q,nbins_chi))
+        
+        for i in range(nbins_m):
+            for j in range(nbins_q):
+                for l in range(nbins_chi):
+                    matrix[i,j,l] = values[k]
+                    k+=1
+            
+        return matrix
+
+    def delta_qs_for_q(self,mbins):
+        '''
+        A function that returns delta log(m2) for each bin in the
+        lower triangular format of the output of arraynd_to_tril.
+        
+        Parameters
+        ----------
+        mbins : numpy array of mass bin edges
+        
+        Returns
+        -------
+        
+        delta_logm2_array : numpy.ndarray
+                        array of delta log(m2)'s
+        '''
+        delta_q_array = np.zeros([len(mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        for i in range(len(mbins)-1):
+            for j in range(len(self.qbins)-1):
+                for k in range(len(self.chi_bins)-1):
+                    delta_q_array[i,j,k] = self.qbins[j+1]-self.qbins[j]
+                    
+        return np.matrix.flatten(delta_q_array)
+    
+    def delta_logm1s_for_q(self, mbins):
+        '''
+        A function that returns delta log(m1) for each bin in the
+        lower triangular format of the output of arraynd_to_tril.
+        
+        Parameters
+        ----------
+        mbins : numpy array of mass bin edges
+        
+        Returns
+        -------
+        
+        delta_logm1_array : numpy.ndarray
+                            1d array of delta log(m1)'s
+        '''
+        delta_logm1_array = np.zeros([len(mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        #print(delta_logm1_array.shape)
+        for i in range(len(mbins)-1):
+            for j in range(len(self.qbins)-1):
+                for k in range(len(self.chi_bins)-1):
+                    delta_logm1_array[i,j,k] = np.log(mbins[i+1]/mbins[i])
+        return np.matrix.flatten(delta_logm1_array)
+    
+    def delta_chis_for_q(self):
+        '''
+        A function that returns delta log(m2) for each bin in the
+        lower triangular format of the output of arraynd_to_tril.
+        
+        Parameters
+        ----------
+        mbins : numpy array of mass bin edges
+        
+        Returns
+        -------
+        
+        delta_logm2_array : numpy.ndarray
+                        array of delta log(m2)'s
+        '''
+        delta_chi_array = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
+        for i in range(len(self.mbins)-1):
+            for j in range(len(self.qbins)-1):
+                for k in range(len(self.chi_bins)-1):
+                    delta_chi_array[i,j,k] = self.chi_bins[k+1]-self.chi_bins[k]
+                    
+        return np.matrix.flatten(delta_chi_array)
+    
+class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
+    """
+    Postprocessing Utilities for GP 
+    rate inference. Functions for parsing
+    samples of rate densities and computing
+    marginal distributions.
+    """
+    
+    def __init__(self,mbins, qbins, chi_bins,kappa=2.7):
+        '''
+        Initialize post-processing utilities class.
+        
+        Parameters
+        ----------
+        
+        mbins :: numpy.ndarray 
+                 1d array containing mass bin edges
+        
+        zbins :: numpy.ndarray
+                 1d array containing redshift bin edges.
+        '''
+        
+        Utils_spins_with_q.__init__(self,mbins,qbins,chi_bins,kappa=kappa)
+    
+    def reshape_uncorr(n_corr,n_corr_chi):
+        '''
+        Function for combining uncorrelated mass and 
+        redshift rate densities into combined rate
+        densities (Eq. .
+        
+        Parameters
+        ----------
+        
+        n_corr   :: numpy.ndarray
+                    array containing rate-densities w.r.t. mass bins
+        
+        n_corr_z :: numpy.ndarray
+                    array containing rate densities w.r.t. redshift bins
+                    
+        
+        Returns
+        -------
+        
+        n_corr_all : numpy.ndarray
+                     array containing combined rate densities
+        
+        '''
+        n_corr_all = np.array([])
+        for i in range(len(n_corr_chi)):
+            n_corr_all = np.append(n_corr_all,n_corr*n_corr_chi[i])
+        return n_corr_all
+    
+    def get_Rpm1_with_q(n_corr,delta_q_array,m1_bins,q_bins,chi_bins,log_bin_centers):
+        '''
+        Function for computing marginal primary mass population: dR/dm1
+        (obtained by integrating dR/dm1dq over z and q)
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        delta_logq_array       ::   numpy.ndarray
+                                     1d array of delta log(q)'s
+        
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+        
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass bin edges
+        
+        zbins                   ::   numpy.ndarray
+                                     1d array containing redshift bin edges
+        
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        
+        
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which dRdm1 is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of dR/dm1 evaluated at the above m1 values
+        
+        '''
+        Rpm1 = np.array([])
+        mass1 = np.array([])
+        for i in range(len(m1_bins)-1):
+            m1_low = m1_bins[i]
+            m1_high = m1_bins[i+1]
+            q_low = q_bins[0]
+            q_high = q_bins[-1]
+            chi_high = chi_bins[-1]
+            chi_low = chi_bins[0]
+            m_array = np.linspace(m1_low,m1_high,100)[:-1]
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                   (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+            rate_density_array = n_corr[bin_idx]
+            delta_qs = delta_q_array[bin_idx]
+            Rpm1 = np.append(Rpm1,[np.sum(rate_density_array*delta_qs) for m in m_array]) #Removed the 1/m division (I assume it's a Jacobian thing)
+            mass1 = np.append(mass1,m_array)
+            print(mass1)
+        return mass1,Rpm1
+    
+    def get_Rpm1_corr_with_q(self,n_corr,delta_q_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,chi_low,chi_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_q_array       ::   numpy.ndarray
+                                     1d array of delta q's
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing mass ratio bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpm1 = np.zeros([len(n_corr),1])
+        mass1 = np.array([])
+        for i in range(len(m1_bins)-1):
+                m1_low = m1_bins[i]
+                m1_high = m1_bins[i+1]
+                q_low = q_bins[0]
+                q_high = q_bins[-1]
+                m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_qs = delta_q_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*((delta_qs*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:])),axis=1)
+                mass1 = np.append(mass1,m_array)
+                #mass1 = mass1.append(m_array)
+                #print(mass1)
+        print(mass1.shape, Rpm1.shape)
+        return mass1,Rpm1[:,1:]
+    
+    
+    def get_Rpm1_q_corr_with_q(self,n_corr,delta_q_array,delta_chi_array,m1_bins,chi_bins,log_bin_centers,q_low,q_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_q_array       ::   numpy.ndarray
+                                     1d array of delta q's
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing mass ratio bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpm1 = np.zeros([len(n_corr),1])
+        mass1 = np.array([])
+        for i in range(len(m1_bins)-1):
+                m1_low = m1_bins[i]
+                m1_high = m1_bins[i+1]
+                chi_low = chi_bins[0]
+                chi_high = chi_bins[-1]
+                m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_qs = delta_q_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*((delta_qs*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:])),axis=1)
+                mass1 = np.append(mass1,m_array)
+                #mass1 = mass1.append(m_array)
+                #print(mass1)
+        print(mass1.shape, Rpm1.shape)
+        return mass1,Rpm1[:,1:]
+    
+    def get_Rpm1_qchi_corr_with_q(self,n_corr,delta_q_array,delta_chi_array,m1_bins,chi_bins,log_bin_centers,q_low,q_high,chi_low,chi_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_q_array       ::   numpy.ndarray
+                                     1d array of delta q's
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing mass ratio bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpm1 = np.zeros([len(n_corr),1])
+        mass1 = np.array([])
+        for i in range(len(m1_bins)-1):
+                m1_low = m1_bins[i]
+                m1_high = m1_bins[i+1]
+                #chi_low = chi_bins[0]
+                #chi_high = chi_bins[-1]
+                m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_qs = delta_q_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpm1 = np.concatenate((Rpm1,np.sum(rate_density_array*((delta_qs*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:])),axis=1)
+                mass1 = np.append(mass1,m_array)
+                #mass1 = mass1.append(m_array)
+                #print(mass1)
+        print(mass1.shape, Rpm1.shape)
+        return mass1,Rpm1[:,1:]
+        
+    def get_Rpq_with_q(n_corr,delta_logm1_array,m1_bins,q_bins,chi_bins,log_bin_centers):
+        '''
+        Function for computing marginal primary mass population: dR/dm1
+        (obtained by integrating dR/dm1dq over z and q)
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_logq_array       ::   numpy.ndarray
+                                     1d array of delta log(q)'s
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass bin edges
+
+        zbins                   ::   numpy.ndarray
+                                     1d array containing redshift bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which dRdm1 is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of dR/dm1 evaluated at the above m1 values
+
+        '''
+        Rpq = np.zeros([len(n_corr),1])
+        mrat = np.array([])
+        for i in range(len(q_bins)-1):
+            q_low = m1_bins[i]
+            q_high = m1_bins[i+1]
+            m1_low = q_bins[0]
+            m1_high = q_bins[-1]
+            chi_high = chi_bins[-1]
+            chi_low = chi_bins[0]
+            m_array = np.linspace(m1_low,m1_high,100)[:-1]
+            q_array = np.linspace(q_low,q_high,100)[:-1]
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                   (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+            rate_density_array = n_corr[:,bin_idx]
+            delta_logm1s = delta_logm1_array[bin_idx]
+            Rpq = np.concatenate((Rpq,np.sum(rate_density_array*delta_logm1s[None,:],axis=1)[:,None]/(m_array[None,:])),axis=1)
+
+            #np.append(Rpm1,[np.sum(rate_density_array*delta_logm1s)/m for m in m_array])
+            mrat = np.append(mrat,q_array)
+        return mrat,Rpq[:,1:]
+    
+    def get_Rpq_corr_with_q(self, n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,chi_low,chi_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_logq_array       ::   numpy.ndarray
+                                     1d array of delta log(q)'s
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpq = np.zeros([len(n_corr),1])
+        mrat = np.array([])
+        for i in range(len(q_bins)-1):
+                m1_low = m1_bins[0]
+                m1_high = m1_bins[-1]
+                q_low = q_bins[i]
+                q_high = q_bins[i+1]
+                #m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                m_array = np.ones(99)
+                q_array = np.linspace(q_low,q_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_logm1s = delta_logm1_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpq = np.concatenate((Rpq,(np.sum(rate_density_array*((delta_logm1s*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:]))),axis=1)
+
+                mrat = np.append(mrat,q_array)
+        print(Rpq.shape)
+        return mrat,Rpq[:,1:]
+    
+    def get_Rpq_corr_m1chi_with_q(self, n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,m1_low,m1_high,chi_low,chi_high):
+        '''
+        Function for computing conditional primary mass population: p(m_1|z)
+        evaluated at redshifts belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_logq_array       ::   numpy.ndarray
+                                     1d array of delta log(q)'s
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+        z_low                   ::   float 
+                                     upper edge of redshift bin
+
+
+        Returns
+        -------
+        mass1     :   numpy.ndarray
+                      1d array of primary masses at which p(m1|z) is evaluated
+        Rpm1      :   numpy.ndarray
+                      1d array of p(m1|z) evaluated at the above m1 values and
+                      at redshifts belonging to a particular range
+
+        '''
+        Rpq = np.zeros([len(n_corr),1])
+        mrat = np.array([])
+        for i in range(len(q_bins)-1):
+                #m1_low = m1_bins[0]
+                #m1_high = m1_bins[-1]
+                q_low = q_bins[i]
+                q_high = q_bins[i+1]
+                #m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                m_array = np.ones(99)
+                q_array = np.linspace(q_low,q_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_logm1s = delta_logm1_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpq = np.concatenate((Rpq,(np.sum(rate_density_array*((delta_logm1s*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:]))),axis=1)
+
+                mrat = np.append(mrat,q_array)
+        print(Rpq.shape)
+        return mrat,Rpq[:,1:]
+
+    def get_Rpchi_q_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,q_min,q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(log_bin_centers[:,1]<=q_max)&(log_bin_centers[:,1]>q_min)&(log_bin_centers[:,2]>=chi_bins[i])&(log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+    
+    def get_Rpchi_q_complement_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(~(((log_bin_centers[:,1]<=q_max)&
+                        (log_bin_centers[:,1]>=q_min))))&
+                        (log_bin_centers[:,2]>=chi_bins[i])&
+                        (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+            
+        return chi, Rp_chi[:,1:]
+
+    def get_Rpchi_m_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,m_min,m_max, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(((log_bin_centers[:,0]<=np.log(m_max))&
+                                (log_bin_centers[:,0]>=np.log(m_min))))&
+                                (log_bin_centers[:,2]>=chi_bins[i])&
+                                (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+
+    def get_Rpchi_m_complement_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,m_min,m_max, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(~(((log_bin_centers[:,0]<=np.log(m_max))&
+                        (log_bin_centers[:,0]>=np.log(m_min)))))&
+                        (log_bin_centers[:,2]>=chi_bins[i])&
+                        (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+    
+    def get_Rpchi_mq_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,m_min,m_max, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(((log_bin_centers[:,0]<=np.log(m_max))&
+                                (log_bin_centers[:,0]>=np.log(m_min))))&
+                                (log_bin_centers[:,1]>=q_min)&
+                                (log_bin_centers[:,1]<=q_max)&
+                                (log_bin_centers[:,2]>=chi_bins[i])&
+                                (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+
+    def get_Rpchi_mq_complement_with_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,m_min,m_max, q_min, q_max):
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        #ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
+
+        for i in range(nbins_chi):
+            idx_array = np.arange(len(log_bin_centers))
+            bin_idx = idx_array[(~(((log_bin_centers[:,0]<=np.log(m_max))&
+                        (log_bin_centers[:,0]>=np.log(m_min)))))&
+                        (log_bin_centers[:,1]>=q_min)&
+                        (log_bin_centers[:,1]<=q_max)&        
+                        (log_bin_centers[:,2]>=chi_bins[i])&
+                        (log_bin_centers[:,2]<=chi_bins[i+1])]
+            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,1:]
+
+    def get_Rp_chi_with_q(chi_bins,mbins,qbins,dm1,dq,n_corr_chi_samples,n_corr_samples,n_corr_m_samples,n_corr_q_samples,log_bin_centers):
+
+        nbins_m = len(mbins) - 1
+        nbins_q = len(qbins) - 1
+        n_corr_samples_m_only_2 = n_corr_samples.copy() 
+        n_corr_samples_m_only_2[:,:nbins_m] = n_corr_m_samples
+        n_corr_samples_q_only_2 = n_corr_samples.copy() 
+        n_corr_samples_q_only_2[:,:nbins_q] = n_corr_q_samples
+
+        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
+        ones = np.ones(len(dq))
+        ones[diag_idx]*=2.
+        nbins_chi = len(chi_bins)-1
+
+        Rp_chi,chi = np.zeros((len(n_corr_samples),100)),np.array([ ])
+        for i in range(nbins_chi):
+
+            this_Rp_chi = n_corr_chi_samples[:,i]*np.sum(n_corr_samples_m_only_2*dm1*ones,axis=-1)**np.sum(n_corr_samples_q_only_2*dq*ones,axis=-1)
+
+            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
+            chi=np.append(chi,this_chi)
+            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
+
+        return chi, Rp_chi[:,100:]
+    
+    def get_pm1qchi(self,n_corr,n_sum_bin, m1s,qs,chis,zs,tril_edges, chi_prior = None):
+        '''
+        Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
+        m1,m2,z. Implements Eq.2 or Eq.8 of https://arxiv.org/pdf/2304.08046.pdf
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     2d array containing rate density samples in each bin
+                                     of shape (nsamples,nbins)
+                                     
+        m1s                     ::   numpy.ndarray
+                                     1d array containing values of primary mass m1 at which to evalute p(m1,m2,z)
+                                     
+        m2s                     ::   numpy.ndarray
+                                     1d array containing values of secondary mass m2 at which to evalute p(m1,m2,z)
+        
+        zs                      ::   numpy.ndarray
+                                     1d array containing values of redshift z at which to evalute p(m1,m2,z)
+        
+        tril_edges              ::   numpy.ndarray
+                                     array containing values of m1 bin edges in lower triangular format
+                                     (output of Utils.tril_edges() function)
+        
+        Returns
+        -------
+        
+        p_m1m2z   : numpy.ndarray
+                    1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
+        '''
+        dl_values = Planck15.luminosity_distance(zs).to(u.Gpc).value
+        idx_array = np.arange(len(tril_edges))
+        #print(len(tril_edges))
+        bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
+                   (tril_edges[:,0,1]<=q)&(tril_edges[:,1,1]>=q)&(tril_edges[:,0,2]<=chi)&(tril_edges[:,1,2]>=chi)] for m1,q,chi in zip(m1s,qs,chis)]
+        index_array = np.array([i for i, bi in enumerate(bin_idx) if len(bi)>0])
+        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
+        n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
+    
+        n_corr_at_idx[:, index_array] = n_corr[:,bin_idx]
+        
+        
+        print(n_corr_at_idx.shape)
+        
+        ddL_dz = dl_values/(1+zs) + (1+zs)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(zs)#Jacobian to convert from dL to z 
+        pz_PE = (1+zs)**2 * dl_values**2 * ddL_dz * chi_prior # default PE prior - flat in det frame masses and dL**2 in distance
+        #print(pz_PE.shape) 
+        
+        p_m1qchi = np.dot(n_corr_at_idx.T , 1/n_sum_bin) * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs) ** (self.kappa - 1))/pz_PE/(m1s ** 2)/len(n_corr)
+        return p_m1qchi
+    
+    
+class Vt_Utils_spins_with_q(Utils_spins_with_q):    
+    """
+    Utilities for computing selection effects in GP 
+    rate inference. Functions for computing the mean and
+    std of the volume-time sensitivity during an observing 
+    run given a set of simulated sources that were injected
+    into detector noise realizations and then found above 
+    threshold.
+    """
+    
+    def __init__(self,mbins,qbins,chi_bins,kappa=2.7):
+        '''
+        Initialize post-processing utilities class.
+        
+        Parameters
+        ----------
+        
+        mbins               :: numpy.ndarray 
+                               1d array containing mass bin edges
+        
+        zbins               :: numpy.ndarray
+                               1d array containing redshift bin edges.
+                            
+        include_spins       :: bool
+                               whether or not to reweight spin distributions
+        '''
+        Utils_spins_with_q.__init__(self,mbins,qbins,chi_bins,kappa=kappa)
+
+    def log_reweight_pinjection_mixture_with_q(self, m1, m2, z,s1x, s1y, s1z, s2x, s2y, s2z, pdraw, p_draw_chi_given_m1m2, mix_weights,log_p_s1s2):
+        '''
+        Function for re-weighting an injected event to the 
+        binned population model. Evaluates the log of the quantity being
+        summed over in Eq. A2 of https://arxiv.org/abs/2304.08046.
+        
+        Parameters
+        ----------
+        
+        m1           ::  float
+                         primary mass of the simulated event
+        
+        m2           ::  float
+                         secondary mass of the simulated event
+              
+        z            ::  float
+                         redshift of the simulated event
+        
+        s1x          ::  float
+                         x-component of the spin of the heavier object 
+                         of the simulated event
+        
+        s1y          ::  float
+                         y-component of the spin of the heavier object 
+                         of the simulated event
+        
+        s1z          ::  float
+                         z-component of the spin of the heavier object 
+                         of the simulated event
+        
+        s2x          ::  float
+                         x-component of the spin of the lighter object 
+                         of the simulated event
+        
+        s2y          ::  float
+                         y-component of the spin of the lighter object 
+                         of the simulated event
+        
+        s2z          ::  float
+                         z-component of the spin of the lighter object 
+                         of the simulated event
+                     
+        pdraw        ::  float
+                         probability with which the simulated event
+                         parameters were generated
+        
+        mix_weights  ::  float
+                         mixture-weight associated with this event
+                         in the scenario when multiple injection sets
+                         are mixed together
+        
+        Returns
+        -------
+        
+        tril_weights : numpy.ndarray
+                       1d array of weights corresponding to each bin in the format
+                       of the output of vt_utils.arraynd_to_tril
+                       
+        '''
+        
+        nbins = (len(self.mbins) - 1) * (len(self.qbins) - 1) * (len(self.chi_bins)-1)
+        tril_weights = np.zeros(nbins)
+        
+        chi_eff = (m1*s1z+m2*s2z)/(m1+m2)
+        q = m2 / m1
+        
+        if (m1<self.mbins[0])|(q<self.qbins[0])|(m1>self.mbins[-1])|(q>self.qbins[-1])|(chi_eff<self.chi_bins[0])|(chi_eff>self.chi_bins[-1]):
+                return tril_weights
+        weights = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])    
+        m1_idx = np.clip(np.searchsorted(self.mbins,m1,side='right') - 1,a_min=0,a_max=len(self.mbins)-2)
+        q_idx = np.clip(np.searchsorted(self.qbins,q,side='right') - 1,a_min=0,a_max=len(self.qbins)-2)
+        chi_idx = np.clip(np.searchsorted(self.chi_bins,chi_eff,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-2)
+        log_dVdz = np.log(4*np.pi) + np.log(Planck15.differential_comoving_volume(z).to(u.Gpc**3/u.sr).value)
+        log_time_dilation = (self.kappa-1.)*np.log1p(z)
+        if not log_p_s1s2:
+            log_p_s1s2 = log_prob_spin(s1x,s1y,s1z,m1) + log_prob_spin(s2x,s2y,s2z,m2)
+        weights[m1_idx,q_idx,chi_idx] = np.log(mix_weights) + log_dVdz  + log_time_dilation +log_p_s1s2 -np.log(p_draw_chi_given_m1m2) - np.log(pdraw) - 2 * np.log(m1)  
+        tril_weights = np.matrix.flatten(weights)
+
+        return tril_weights
+    
+    
+    
+    def compute_VTs_for_q(self, inj_data_set,thresh,key = 'optimal_snr_net',log_p_s1s2=None ):
+        '''
+        Function that implements Eqs. B7 and B8 of https://arxiv.org/abs/2304.08046
+        to calculate mean and std of emperically estimated volume-time sensitivity.
+        
+        Parameters
+        ----------
+        
+        inj_data_set   ::   dict
+                            a dictionary containing 1d numpy arrays of
+                            masses, redshifts, sping, sampling_pdfs, ranking statistic,
+                            analysis time, and the total number of injections generated.
+        
+        thresh         ::   float
+                            value of the rankingstatistic threshold. Should match the threshold 
+                            value used to select real events used in the analysis.
+        
+        key            ::   str
+                            the key in inj_data_set that corresponds to the rankingstatistic
+        
+        
+        Returns
+        -------
+        
+        vt_means   :    numpy.ndarray
+                        1d array containing the mean of the emperically estimated 
+                        time volume sensitivity in each bin
+        
+        vt_sigmas  :    numpy.ndarray
+                        1d array containing the std of the emperically estimated 
+                        time volume sensitivity in each bin.
+                            
+        '''
+        if type(key) == list:
+            assert type(thresh)==list and len(thresh)==len(key)
+            
+            selector=np.where(np.sum(np.array([inj_data_set[k]>=th for k,th in zip(key,thresh)]),axis=0))[0]
+        else:
+            selector=np.where(inj_data_set[key]>=thresh)[0]
+        
+        if log_p_s1s2 is None:
+            log_p_s1s2 = np.zeros(len(inj_data_set['mass2_source'])).astype(bool)
+        log_pinjs = np.array(list(map(self.log_reweight_pinjection_mixture_with_q, inj_data_set['mass1_source'][selector],inj_data_set['mass2_source'][selector],inj_data_set['redshift'][selector], inj_data_set['spin1x'][selector],inj_data_set['spin1y'][selector],inj_data_set['spin1z'][selector], inj_data_set['spin2x'][selector],inj_data_set['spin2y'][selector], inj_data_set['spin2z'][selector],inj_data_set['sampling_pdf'][selector], inj_data_set['p_draw_chi_given_m1m2'][selector], inj_data_set['mixture_weight'][selector],log_p_s1s2[selector])))
+        
+        vt_means = np.sum(np.array(list(map(reweight_pinjection,log_pinjs))),axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))/inj_data_set['total_generated']
+        
+        vt_vars = np.sum(np.array(list(map(reweight_pinjection,log_pinjs)))**2,axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))**2/inj_data_set['total_generated']**2 - vt_means**2/inj_data_set['total_generated']
+        
+        vt_sigmas = np.sqrt(vt_vars)
+        
+        return vt_means, vt_sigmas
         
 class Rates(Utils):
     """
@@ -2377,6 +3529,391 @@ class Rates_spins(Utils_spins):
             n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
             
         return gp_model
+    
+    
+class Rates_spins_with_q(Utils_spins_with_q):
+    """
+    Perform GP Rate inference using PyMC. Contains functions
+    that create pymc models to sample the posterior distribution
+    of rate densities in each bin.
+    """
+    def __init__(self, mbins,qbins,chi_bins,kappa=2.7):
+        '''
+        Parameters
+        ----------
+        
+        mbins :: numpy.ndarray 
+                 1d array containing mass bin edges
+        
+        zbins :: numpy.ndarray
+        '''
+        Utils_spins_with_q.__init__(self,mbins,qbins,chi_bins,kappa=kappa)
+        
+    def make_significant_model_3d_evolution_only_with_q(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_chi_dim=None, vt_sigmas=None,vt_accuracy_check=None):
+        '''
+        Function that creates a pymc model that will sample the posterior in 
+        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
+        for the un-correlated population model in Eq. 8 and the GP priors in Eqs. 9,10.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+        
+        weights                          ::    numpy.ndarray
+                                               array containing the posterior weights of each event in each bin (shape is 
+                                               n_events,nbins). The weight for each ev
+        
+        tril_vts                         ::    numpy.ndarray
+                                               array containing mean values of emperically estimated VTs. First output of
+                                               Vt_Utils.compute_vts 
+        
+        tril_deltaLogbins                ::    numpy.ndarray
+                                               1d array containing delta_log_bin corresponding to each bin in the 
+                                               lower triangular format of the output of Utils.arraynd_to_tril
+                                               
+        ls_mean_m                        ::    float
+                                               mean of the lengthscale for the GP corresponding to masses
+                                               
+        ls_sd_m                          ::    float
+                                               std of the lengthscale for the GP corresponding to masses.
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the lengthscale for the GP corresponding to redshift
+                                               
+        ls_sd_z                          ::    float
+                                               std of the lengthscale for the GP corresponding to redshift.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP corresponding to masses. Default is 1
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP corresponding to redshift. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = number of
+                                               redshift bins.
+        
+        vt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of emperically estimated VTs. Second output of
+                                               Vt_Utils.compute_vts. Default is None (Should not be None if vt_accuracy_check=True)
+        
+        vt_accuracy_check                ::    bool
+                                               Whether or not to implement marginalization of Monte Carlo uncertainties in VT 
+                                               estimation. If True, samples from the posterior on Eq. B11. If False (default),
+                                               samples from the posterior in Eq. A6.
+                                               
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities posterior.
+        '''
+        
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0::(nm * nq),2][:,None]
+        bin_centers_q = log_bin_centers[0:nq, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0:nm * nq: nq, 0][:,None]
+        #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
+        
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
+            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
+            #print(np.array([bin_centers_chi, log_bin_centers_m, bin_centers_q]).shape[0])
+            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_q, covariance_m])
+            #covariance = sigma ** 2 * pm.gp.cov.ExpQuad(input_dim = 3, ls = [length_scale_m, length_scale_q, length_scale_chi])
+            #gp = pm.gp.Latent(cov_func = covariance)
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, bin_centers_q, log_bin_centers_m])
+            #logn_corr = gp.prior('logn_corr', X = log_bin_centers)
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
+            n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
+        
+        
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0::(nm * nq),2][:,None]
+        bin_centers_q = log_bin_centers[0:nq, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0:nm * nq: nq, 0][:,None]
+        
+        vts = (tril_vts*tril_deltaLogbins).reshape((nchi,nq,nm)).T
+        N_ev = len(weights)
+        weights = np.array([weights[i].reshape((nchi,nq,nm)).T for i in range(len(weights))])
+        
+        if mu_chi_dim is None:
+            mu_chi_dim=nchi
+        assert mu_chi_dim ==1 or mu_chi_dim == nchi
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas = (vt_sigmas*tril_deltaLogbins).reshape((nchi,nq,nm)).T
+        else:
+            vt_sigmas = np.zeros((nchi,nq,nm)).T
+            
+        with pm.Model() as gp_model:
+            mu = pm.Normal('mu',mu=0,sigma=10,shape=nm)
+            mu_chi = pm.Normal('mu_chi',mu=0,sigma=1,shape=mu_chi_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            sigma_chi = 1.
+            length_scale = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance = sigma**2*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale)
+            covariance_chi = sigma_chi**2*pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.Latent(cov_func=covariance)
+            gp_chi = pm.gp.Latent(cov_func=covariance_chi)
+            logn_corr = gp.prior('logn_corr',X=logm_bin_centers)
+            logn_corr_chi = gp_chi.prior('logn_corr_chi',X=chi_bin_centers)
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            logn_tot_chi = pm.Deterministic('logn_tot_chi', mu_chi+logn_corr_chi)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
+            n_corr_chi = pm.Deterministic('n_corr_chi',tt.exp(logn_tot_chi))
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(tt.exp(logn_tot+tt.log(tt.sum(vts*n_corr_chi,axis = 1)))))
+            #N_F_exp_var = pm.Deterministic('N_F_exp_var', tt.sum(tt.exp(2.*logn_tot+ 2.*tt.log(tt.sum( vt_sigmas*n_corr_chi,axis = 1)))) if vt_accuracy_check else pm.math.constant(0.,dtype=float))
+            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(tt.sum(weights*n_corr_chi,axis=2),n_corr))) - N_F_exp)#+0.5*N_F_exp_var)
+            #n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((tt.exp(logn_tot+tt.log(tt.sum(vts*n_corr_chi,axis = 1)))*(int(vt_accuracy_check))-2*tt.exp(2.*logn_tot+ 2.*tt.log(tt.sum( vt_sigmas*n_corr_chi,axis = 1)))).max(),0.),0.,-100))
+            
+        return gp_model
+    
+    
+    def make_gp_prior_model_3d_evolution_only(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
+        '''
+        Function that creates a pymc model for sampling rate-densities
+        from the GP priors in Eqs. 9,10.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+                                             
+        ls_mean_m                        ::    float
+                                               mean of the lengthscale for the GP corresponding to masses
+                                               
+        ls_sd_m                          ::    float
+                                               std of the lengthscale for the GP corresponding to masses.
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the lengthscale for the GP corresponding to redshift
+                                               
+        ls_sd_z                          ::    float
+                                               std of the lengthscale for the GP corresponding to redshift.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP corresponding to masses. Default is 1
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP corresponding to redshift. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = number of
+                                               redshift bins.
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities prior.
+        
+        '''
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
+        #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
+        
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
+            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
+            #print(np.array([bin_centers_chi, log_bin_centers_m, bin_centers_q]).shape[0])
+            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_q, covariance_m])
+            #covariance = sigma ** 2 * pm.gp.cov.ExpQuad(input_dim = 3, ls = [length_scale_m, length_scale_q, length_scale_chi])
+            #gp = pm.gp.Latent(cov_func = covariance)
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, bin_centers_q, log_bin_centers_m])
+            #logn_corr = gp.prior('logn_corr', X = log_bin_centers)
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+           # log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
+        return gp_model
+    
+    def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
+        '''
+        Function that creates a pymc model that will sample the posterior in 
+        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
+        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+        
+        weights                          ::    numpy.ndarray
+                                               array containing the posterior weights of each event in each bin (shape is 
+                                               n_events,nbins).
+        
+        tril_vts                         ::    numpy.ndarray
+                                               array containing mean values of emperically estimated VTs. First output of
+                                               Vt_Utils.compute_vts 
+        
+        tril_deltaLogbins                ::    numpy.ndarray
+                                               1d array containing delta_log_bin corresponding to each bin in the 
+                                               lower triangular format of the output of Utils.arraynd_to_tril
+                                               
+        ls_mean_m                        ::    float
+                                               mean of the mass axis of the lengthscale for the single GP.
+                                               
+        ls_sd_m                          ::    float
+                                               std of the mass axis of the lengthscale for the single GP..
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the redshift axis of the lengthscale for the single GP.
+                                               
+        ls_sd_z                          ::    float
+                                               std of the redshift axis of the lengthscale for the single GP.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP. Default is 10
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
+        vt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
+        
+        vt_accuracy_check                ::    bool
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
+                                               
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities posterior.
+        '''
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        nm = int(len(log_bin_centers)/nchi)
+        assert nm == len(log_bin_centers)/nchi
+        bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        log_bin_centers_m = log_bin_centers[:nm,:2]
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=length_scale_m)
+            covariance_chi = sigma*pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_m]) 
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, log_bin_centers_m])
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
+            n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
+            
+        return gp_model    
+
 
     def make_significant_model_3d_with_q(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
         '''
@@ -2467,9 +4004,9 @@ class Rates_spins(Utils_spins):
         #assert nm == len(log_bin_centers)/nchi
         #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
         #log_bin_centers_m = log_bin_centers[:nm,:2]
-        bin_centers_chi = log_bin_centers[0::(nm * nq),2][:,None]
-        bin_centers_q = log_bin_centers[0:nq, 1][:,None]
-        log_bin_centers_m = log_bin_centers[0:nm * nq: nq, 0][:,None]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
         #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
         
         with pm.Model() as gp_model:
@@ -2498,7 +4035,247 @@ class Rates_spins(Utils_spins):
         return gp_model
         
         
-    
+    def make_significant_model_3d_with_q_cut(self,log_bin_centers, arg_mat_spin,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
+        '''
+        Function that creates a pymc model that will sample the posterior in 
+        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
+        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+        
+        weights                          ::    numpy.ndarray
+                                               array containing the posterior weights of each event in each bin (shape is 
+                                               n_events,nbins).
+        
+        tril_vts                         ::    numpy.ndarray
+                                               array containing mean values of emperically estimated VTs. First output of
+                                               Vt_Utils.compute_vts 
+        
+        tril_deltaLogbins                ::    numpy.ndarray
+                                               1d array containing delta_log_bin corresponding to each bin in the 
+                                               lower triangular format of the output of Utils.arraynd_to_tril
+                                               
+        ls_mean_m                        ::    float
+                                               mean of the mass axis of the lengthscale for the single GP.
+                                               
+        ls_sd_m                          ::    float
+                                               std of the mass axis of the lengthscale for the single GP..
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the redshift axis of the lengthscale for the single GP.
+                                               
+        ls_sd_z                          ::    float
+                                               std of the redshift axis of the lengthscale for the single GP.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP. Default is 10
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
+        vt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
+        
+        vt_accuracy_check                ::    bool
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
+                                               
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities posterior.
+        '''
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
+        #print(bin_centers_chi, bin_centers_q, log_bin_centers_m)
+        
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
+            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
+            #print(np.array([bin_centers_chi, log_bin_centers_m, bin_centers_q]).shape[0])
+            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_q, covariance_m])
+            #covariance = sigma ** 2 * pm.gp.cov.ExpQuad(input_dim = 3, ls = [length_scale_m, length_scale_q, length_scale_chi])
+            #gp = pm.gp.Latent(cov_func = covariance)
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, bin_centers_q, log_bin_centers_m])
+            #logn_corr = gp.prior('logn_corr', X = log_bin_centers)
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot) * arg_mat_spin)
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
+            n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
+            
+        return gp_model    
         
         
-       
+    def make_significant_model_3d_with_q_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None):
+        '''
+        Function that creates a pymc model that will sample the posterior in 
+        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
+        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+                
+        Parameters
+        ----------
+        log_bin_centers                  ::    numpy.ndarray
+                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               output of Utils.generate_log_bin_centers
+        
+        weights                          ::    numpy.ndarray
+                                               array containing the posterior weights of each event in each bin (shape is 
+                                               n_events,nbins).
+        
+        tril_vts                         ::    numpy.ndarray
+                                               array containing mean values of emperically estimated VTs. First output of
+                                               Vt_Utils.compute_vts 
+        
+        tril_deltaLogbins                ::    numpy.ndarray
+                                               1d array containing delta_log_bin corresponding to each bin in the 
+                                               lower triangular format of the output of Utils.arraynd_to_tril
+                                               
+        ls_mean_m                        ::    float
+                                               mean of the mass axis of the lengthscale for the single GP.
+                                               
+        ls_sd_m                          ::    float
+                                               std of the mass axis of the lengthscale for the single GP..
+                                               
+        ls_mean_z                        ::    float
+                                               mean of the redshift axis of the lengthscale for the single GP.
+                                               
+        ls_sd_z                          ::    float
+                                               std of the redshift axis of the lengthscale for the single GP.
+        
+        sigma_sd                         ::    float
+                                               std of the sigma for GP. Default is 10
+        
+        mu_z_dim                         ::    int
+                                               number of mean functions for the GP. Can be 1
+                                               or None. Default is None which corresponds to mu_dim = 
+                                               number of bins.
+        
+        vt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of emperically estimated
+                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               None (Should not be None if vt_accuracy_check=True)
+        
+        vt_accuracy_check                ::    bool
+                                               Whether or not to implement marginalization of Monte 
+                                               Carlo uncertainties in VT estimation. If True,
+                                               samples from the posterior on Eq. B11. If False 
+                                               (default), samples from the posterior in Eq. A6.
+        
+                                               
+        
+        Returns
+        -------
+        
+        gp_model  : pymc.Model object.
+                    model object for sampling the rate densities posterior.
+        '''
+        tril_vts = tril_vts*tril_deltaLogbins
+        arg = tril_vts>0.
+        if(len(np.where(~arg)[0])>0):
+            tril_vts = tril_vts[np.where(arg)[0]]
+            weights = weights[:,np.where(arg)[0]]
+            wt_means = wt_means[:,np.where(arg)[0]]
+            wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
+            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+        
+        if vt_accuracy_check :
+            assert vt_sigmas is not None
+            vt_sigmas*=tril_deltaLogbins
+            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        
+        else:
+            n_eff = 1
+        
+        if mu_dim is None:
+            mu_dim=len(log_bin_centers)
+        assert mu_dim==1 or mu_dim==len(log_bin_centers)
+        
+        nchi= len(self.chi_bins)-1
+        #nm = int(len(log_bin_centers)/(nchi))
+        nm = len(self.mbins) - 1
+        nq = int(len(log_bin_centers)/(nm * nchi))
+        #assert nm == len(log_bin_centers)/nchi
+        #bin_centers_chi = log_bin_centers[0::nm,2][:,None]
+        #log_bin_centers_m = log_bin_centers[:nm,:2]
+        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
+        bin_centers_q = log_bin_centers[0:nq * nchi: nchi, 1][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi * nq, 0][:,None]
+        
+        with pm.Model() as gp_model:
+            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
+            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
+            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
+            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
+            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
+            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
+            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
+            #print(np.array([bin_centers_chi, log_bin_centers_m, bin_centers_q]).shape[0])
+            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(1,ls=length_scale_chi)
+            gp = pm.gp.LatentKron(cov_funcs=[covariance_chi, covariance_q, covariance_m])
+            #covariance = sigma ** 2 * pm.gp.cov.ExpQuad(input_dim = 3, ls = [length_scale_m, length_scale_q, length_scale_chi])
+            #gp = pm.gp.Latent(cov_func = covariance)
+            logn_corr = gp.prior('logn_corr',Xs=[bin_centers_chi, bin_centers_q, log_bin_centers_m])
+            #logn_corr = gp.prior('logn_corr', X = log_bin_centers)
+            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
+            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
+            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
+            n_f_exp = n_corr_physical*tril_vts
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
+            Ndet =  pm.Deterministic('Ndet', tt.sum(n_f_exp, axis = -1))  #np.dot(n_corr_physical, tril_vts)
+            denominator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
+            numerator = tt.dot(wt_means, n_corr_physical)**2
+            N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
+            #n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
+            n_eff_potential = pm.Potential('n_eff_potential', -tt.log1p((n_eff/(2 * Ndet)) ** (-44)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (-44)))
+            
+        return gp_model         

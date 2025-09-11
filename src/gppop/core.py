@@ -13,6 +13,7 @@ from astropy import units as u
 from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
 import warnings
+import arviz as az
 
 ############################
 #  Support Functions       #
@@ -1781,7 +1782,7 @@ class Utils_spins_with_q():
         '''
         return np.matrix.flatten(arr)
 
-    def compute_weights_with_q(self, samples,m1m2_given_z_prior=None,chi_prior=None,leftmost_chibin=None):
+    def compute_weights_with_q(self, samples,m1m2_given_z_prior=None,chi_prior=None,leftmost_chibin=None, full_prior=None,O4_prior = False):
         '''
         Function to compute the weights needed to reweight
         posterior samples to the population distribution,
@@ -1824,12 +1825,17 @@ class Utils_spins_with_q():
             chi_indices = np.clip(np.searchsorted(np.append([leftmost_chibin], self.chi_bins),chi_samples,side='right') - 1,a_min=0,a_max=len(self.chi_bins)-1)
             
         pz_pop = Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value*((1+z_samples)**(self.kappa-1))
-        ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
-        if m1m2_given_z_prior is None:
-            pz_PE = (1+z_samples)**2 * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
-        else : 
-            pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz
-        pz_PE*=chi_prior
+        
+        if full_prior is None:
+            ddL_dz = dl_values/(1+z_samples) + (1+z_samples)*Planck15.hubble_distance.to(u.Gpc).value/Planck15.efunc(z_samples)#Jacobian to convert from dL to z 
+            m1m2_given_z_prior = m1m2_given_z_prior if m1m2_given_z_prior is not None else (1+z_samples)**2
+            if not O4_prior:
+                pz_PE = m1m2_given_z_prior * dl_values**2 * ddL_dz # default PE prior - flat in det frame masses and dL**2 in distance
+            else : 
+                pz_PE = m1m2_given_z_prior * Planck15.differential_comoving_volume(z_samples).to(u.Gpc**3/u.sr).value/(1+z_samples) # m1m2_given_z_prior * dl_values**2 * ddL_dz
+            pz_PE*=chi_prior
+        else:
+            pz_PE=full_prior
         pz_weight = pz_pop/pz_PE
         indices = zip(m1_indices,q_indices,chi_indices)
         #print(inds for i,inds in enumerate(indices))
@@ -2720,7 +2726,109 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         
         p_m1qchi = np.dot(n_corr_at_idx.T , 1/n_sum_bin) * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs) ** (self.kappa - 1))/pz_PE/(m1s ** 2)/len(n_corr)
         return p_m1qchi
+
+    def get_arviz_stats_with_q(self, trace):
+        neff = np.min(az.ess(trace)['n_corr']).item()
+        rhat = np.max(az.rhat(trace)['n_corr']).item()
+        stats_dict = {'Neff': neff, 'Rhat': rhat}
+
+        return stats_dict
+
+    def get_pearson_coeff_mass_range_with_q(self, n_corr, dm1, dq, dchi, log_bin_centers, m_min, m_max):
+    	rho_m1_range = []
+    	
+    	nbins_m = len(self.mbins)-1
+    	nbins_q = len(self.qbins) - 1
+    	nbins_chi = len(self.chi_bins)-1
+	    	
+    	m1_bin_centers = np.exp(log_bin_centers[0::nbins_chi * nbins_q, 0])
+    	qbin_centers = log_bin_centers[0:nbins_q * nbins_chi: nbins_chi, 1]
+    	chi_bin_centers = log_bin_centers[0:nbins_chi,2]
+        	
+    	for hsamp in range(len(n_corr)):
+    	    hyp_samp1 = self.construct_1dtond_matrix_with_q(nbins_m,n_corr[hsamp] * dm1 * dq * dchi,nbins_chi=nbins_chi, nbins_q = nbins_q)
+    	    m_min_idx = np.where(np.round(self.mbins, 1) == m_min)[0][0]
+    	    m_max_idx = np.where(np.round(self.mbins, 1) == m_max)[0][0]
+    	    
+    	    idx_arr = np.arange(m_min_idx, m_max_idx)
+    	    P_qchi = np.mean(hyp_samp1[idx_arr,:,:], axis = 0) / np.sum(np.mean(hyp_samp1[idx_arr,:,:], axis = 0))
     
+    	    Q, CHI = np.meshgrid(qbin_centers, chi_bin_centers, indexing='ij')
+    	    E_q = np.sum(Q * P_qchi)
+    	    E_chi = np.sum(CHI * P_qchi)
+    
+    	    E_q2 = np.sum(Q**2 * P_qchi)
+    	    E_chi2 = np.sum(CHI**2 * P_qchi)
+    	    E_qchi = np.sum(Q * CHI * P_qchi)
+    
+    	    # Step 4: Compute variances and covariance
+    	    Var_q = E_q2 - E_q**2
+    	    Var_chi = E_chi2 - E_chi**2
+    	    Cov_qchi = E_qchi - E_q * E_chi
+    
+    	    # Step 5: Pearson correlation coefficient
+    	    rho_m1_range.append(Cov_qchi / np.sqrt(Var_q * Var_chi))
+    
+    	rho_m1_range = np.array(rho_m1_range)
+    	
+    	return rho_m1_range
+
+
+    def get_pearson_coeff_mass_marg_with_q(self, n_corr, dm1, dq, dchi, log_bin_centers):
+    	rho_m1_full = []
+    	
+    	nbins_m = len(self.mbins)-1
+    	nbins_q = len(self.qbins) - 1
+    	nbins_chi = len(self.chi_bins)-1
+	    	
+    	m1_bin_centers = np.exp(log_bin_centers[0::nbins_chi * nbins_q, 0])
+    	qbin_centers = log_bin_centers[0:nbins_q * nbins_chi: nbins_chi, 1]
+    	chi_bin_centers = log_bin_centers[0:nbins_chi,2]
+    	
+    	for hsamp in range(len(n_corr)):
+            hyp_samp1 = self.construct_1dtond_matrix_with_q(nbins_m,n_corr[hsamp] * dm1 * dq * dchi,nbins_chi=nbins_chi, nbins_q = nbins_q)
+            
+            hyp_samp_mean = np.mean(hyp_samp1, axis = 0)
+            P_qchi = hyp_samp_mean / np.sum(hyp_samp_mean)
+            
+            Q, CHI = np.meshgrid(qbin_centers, chi_bin_centers, indexing='ij')
+            E_q = np.sum(Q * P_qchi)
+            E_chi = np.sum(CHI * P_qchi)
+            
+            E_q2 = np.sum(Q**2 * P_qchi)
+            E_chi2 = np.sum(CHI**2 * P_qchi)
+            E_qchi = np.sum(Q * CHI * P_qchi)
+            
+            # Step 4: Compute variances and covariance
+            Var_q = E_q2 - E_q**2
+            Var_chi = E_chi2 - E_chi**2
+            Cov_qchi = E_qchi - E_q * E_chi
+            
+            # Step 5: Pearson correlation coefficient
+            rho_m1_full.append(Cov_qchi / np.sqrt(Var_q * Var_chi))
+    
+    	rho_m1_full = np.array(rho_m1_full)
+    	
+    	return rho_m1_full
+
+
+    def get_two_d_q_chi_with_q(self, n_corr, dm1, m_min, m_max):
+    	
+        nbins_m = len(self.mbins)-1
+        nbins_q = len(self.qbins) - 1
+        nbins_chi = len(self.chi_bins)-1
+        
+        p_avg_m1qchi = np.mean(n_corr, axis = 0)
+        
+        p_avg = self.construct_1dtond_matrix_with_q(nbins_m, p_avg_m1qchi * dm1,nbins_chi=nbins_chi, nbins_q = nbins_q)
+        
+        m_min_idx = np.where(np.round(self.mbins, 1) == m_min)[0][0]
+        m_max_idx = np.where(np.round(self.mbins, 1) == m_max)[0][0]
+        
+        idx_arr = np.arange(m_min_idx, m_max_idx)
+        matrix1 = np.sum(p_avg[idx_arr,:,:], axis = 0)   
+        
+        return matrix1
     
 class Vt_Utils_spins_with_q(Utils_spins_with_q):    
     """
@@ -4155,7 +4263,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
         return gp_model    
         
         
-    def make_significant_model_3d_with_q_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None):
+    def make_significant_model_3d_with_q_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m, ls_mean_q, ls_sd_q, ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None, exponent = -30):
         '''
         Function that creates a pymc model that will sample the posterior in 
         Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
@@ -4276,6 +4384,6 @@ class Rates_spins_with_q(Utils_spins_with_q):
             numerator = tt.dot(wt_means, n_corr_physical)**2
             N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
             #n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
-            n_eff_potential = pm.Potential('n_eff_potential', -tt.log1p((n_eff/(2 * Ndet)) ** (-44)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (-44)))
+            n_eff_potential = pm.Potential('n_eff_potential', -tt.log1p((n_eff/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent)))
             
         return gp_model         

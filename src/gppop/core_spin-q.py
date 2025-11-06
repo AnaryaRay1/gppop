@@ -71,17 +71,18 @@ def reweight_pinjection(tril_weights):
 
 def construct_arg_mat_out_spins(mbins, qbins, chi_bins):
     '''
-    Function that returns the set of lower-triangular
-    entries (m2<=m1) of a collection of 2d matrices
-    each binned by m1 and m2. For the m1,m2,z inference,
-    it returns multiple sets of lower triangular (m2<=m1) 
-    entries, one set corresponding to each redshift bin.
-    Uses numpy's tril_indices function.
+    Function that enables removal of unphysical bins in the m1-q space. 
     
     Parameters
     ----------
-    arr :: numpy.ndarray
-           Input 2d or 3d matrix.
+    mbins :: numpy.ndarray 
+                 1d array containing mass bin edges
+        
+    qbins :: numpy.ndarray 
+                 1d array containing mass bin edges    
+        
+    chi_bins :: numpy.ndarray
+                 1d array containing effective spin bin edges.
     
     '''
     
@@ -108,8 +109,8 @@ def construct_arg_mat_out_spins(mbins, qbins, chi_bins):
 class Utils_spins_with_q():
     """
     Utilities for GP rate inference. Contains 
-    functions for binning up the m1,m2,z or m1,m2 only
-    parameter spaces, and computing various attributes 
+    functions for binning up the m1,q,chieff 
+    parameter space, and computing various attributes 
     of bins and posterior weights in bins.
     """
     
@@ -122,6 +123,9 @@ class Utils_spins_with_q():
         
         mbins :: numpy.ndarray 
                  1d array containing mass bin edges
+                 
+        qbins :: numpy.ndarray 
+                 1d array containing mass-ratio bin edges
         
         chi_bins :: numpy.ndarray
                  1d array containing effective spin bin edges.
@@ -137,17 +141,9 @@ class Utils_spins_with_q():
 
     def construct_arg_mat(self):
         '''
-        Function that returns the set of lower-triangular
-        entries (m2<=m1) of a collection of 2d matrices
-        each binned by m1 and m2. For the m1,m2,z inference,
-        it returns multiple sets of lower triangular (m2<=m1) 
-        entries, one set corresponding to each redshift bin.
-        Uses numpy's tril_indices function.
+        Function that enables removal of unphysical bins in the m1-q space,
+        as an attribute of Utils_spin_with_q()
         
-        Parameters
-        ----------
-        arr :: numpy.ndarray
-               Input 2d or 3d matrix.
         
         '''
     
@@ -172,11 +168,11 @@ class Utils_spins_with_q():
     
     def arraynd_to_tril(self,arr, arg_mat):
         '''
-        Function that returns the set of lower-triangular
-        entries (m2<=m1) of a collection of 2d matrices
-        each binned by m1 and m2. For the m1,m2,z inference,
-        it returns multiple sets of lower triangular (m2<=m1) 
-        entries, one set corresponding to each redshift bin.
+        Function that returns the set of entries 
+        (q<=m1_min/m1) of a collection of 2d matrices
+        each binned by m1 and q. For the m1,q,chieff inference,
+        it returns multiple sets of q-cut (q<=m1_min/m1) 
+        entries, one set corresponding to each chieff bin.
         Uses numpy's tril_indices function.
 
         Parameters
@@ -235,8 +231,7 @@ class Utils_spins_with_q():
         Returns
         -------
         weights : numpy.ndarray
-                  The weight matrix of shape(mbins,mbins) for m1,m2 only 
-                  inference and of shape(mbins,mbins,chi_bins) for m1,m2,chi_eff
+                  The weight matrix of shape(mbins,qbins,chi_bins) for m1,q,chi_eff
                   inference.
         '''
         weights = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
@@ -313,7 +308,7 @@ class Utils_spins_with_q():
     
     def tril_edges(self):
         '''
-        A function that returns the m1,m2,chi_eff edges of each bin
+        A function that returns the m1,q,chi_eff edges of each bin
         in the form of the output of arraynd_to_tril()
         
         Returns
@@ -334,7 +329,7 @@ class Utils_spins_with_q():
 
     def generate_log_bin_centers(self):
         '''
-        Function that returns n-D bin centers in logm1,logm2,chi_eff space.
+        Function that returns n-D bin centers in logm1,q,chi_eff space.
 
         Returns
         -------
@@ -347,7 +342,6 @@ class Utils_spins_with_q():
             nbin2 = len(self.chi_bins) - 1
             nbin = len(self.qbins) - 1
             chi_bin_centres = np.asarray([0.5*(self.chi_bins[i+1]+self.chi_bins[i])for i in range(nbin2)])
-            #l1, l5 = np.meshgrid(logm1_bin_centres, logm2_bin_centres)
             q_bin_centres = np.asarray([0.5*(self.qbins[j+1]+self.qbins[j]) for j in range(nbin)])
             l1, l2 = np.meshgrid(chi_bin_centres, q_bin_centres)
             l3 = np.array([[0.5*(np.log(self.mbins[k+1])+np.log(self.mbins[k]))] for i in range(nbin*nbin2)])
@@ -366,10 +360,10 @@ class Utils_spins_with_q():
     def construct_1dtond_matrix(self,nbins_m,values,nbins_chi, nbins_q, tril=True):
         '''
         Inverse of arraynd_to_tril() Returns a n-D
-        represenation matrix of a given set of the lower
-        triangular 1-D values or multiple sets of lower 
-        triangular 1D values, one set corresponding to 
-        each redshift bin.
+        represenation matrix of a given set of q-cut
+        1-D values or multiple sets of q-cut
+        1-D values, one set corresponding to 
+        each chieff bin.
 
         Parameters
         ----------
@@ -378,7 +372,9 @@ class Utils_spins_with_q():
         nbins_m : int
             number of mass bins
         nbins_chi : int
-            number of redshift bins
+            number of chieff bins
+        nbins_q : int
+            number of mass-ratio bins
             
         Returns
         -------
@@ -403,11 +399,14 @@ class Utils_spins_with_q():
 
     def construct_1dtond_matrix_small(self,nbins_m, m_min, m_max,values,nbins_chi, nbins_q, tril=True):
         '''
-        Inverse of arraynd_to_tril() Returns a n-D
-        represenation matrix of a given set of the lower
-        triangular 1-D values or multiple sets of lower 
-        triangular 1D values, one set corresponding to 
-        each redshift bin.
+        Inverse of arraynd_to_tril() for a restricted
+        range of primary masses, required for Pearson 
+        coefficient computation in post processing,
+        Returns a n-D
+        represenation matrix of a given set of q-cut
+        1-D values or multiple sets of q-cut
+        1-D values, one set corresponding to 
+        each chieff bin.
 
         Parameters
         ----------
@@ -416,7 +415,9 @@ class Utils_spins_with_q():
         nbins_m : int
             number of mass bins
         nbins_chi : int
-            number of redshift bins
+            number of chieff bins
+        nbins_q : int
+            number of mass-ratio bins
             
         Returns
         -------
@@ -445,18 +446,15 @@ class Utils_spins_with_q():
 
     def delta_q(self):
         '''
-        A function that returns delta log(m2) for each bin in the
+        A function that returns delta q for each bin in the
         lower triangular format of the output of arraynd_to_tril.
         
-        Parameters
-        ----------
-        mbins : numpy array of mass bin edges
         
         Returns
         -------
         
-        delta_logm2_array : numpy.ndarray
-                        array of delta log(m2)'s
+        delta_q_array : numpy.ndarray
+                        array of delta q's
         '''
         delta_q_array = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
         for i in range(len(self.mbins)-1):
@@ -470,9 +468,6 @@ class Utils_spins_with_q():
         A function that returns delta log(m1) for each bin in the
         lower triangular format of the output of arraynd_to_tril.
         
-        Parameters
-        ----------
-        mbins : numpy array of mass bin edges
         
         Returns
         -------
@@ -497,8 +492,8 @@ class Utils_spins_with_q():
         Returns
         -------
         
-        delta_logm2_array : numpy.ndarray
-                        array of delta log(m2)'s
+        delta_chi_array : numpy.ndarray
+                        array of delta chieff's
         '''
         delta_chi_array = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
         for i in range(len(self.mbins)-1):
@@ -525,6 +520,9 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         
         mbins :: numpy.ndarray 
                  1d array containing mass bin edges
+        
+        qbins :: numpy.ndarray 
+                 1d array containing mass-ratio bin edges
         
         chi_bins :: numpy.ndarray
                  1d array containing effective spin bin edges.
@@ -564,7 +562,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
     
     def get_Rpm1_corr(self,n_corr,delta_q_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,q_low, q_high, chi_low,chi_high):
         '''
-        Function for computing conditional primary mass population: p(m_1|z)
+        Function for computing conditional primary mass population: p(m_1|q, chi_eff)
         evaluated at redshifts belonging to some range
         
         Parameters
@@ -573,32 +571,41 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         n_corr                  ::   numpy.ndarray
                                      array containing rate density in each bin
         
-        delta_logm2_array       ::   numpy.ndarray
-                                     1d array of delta log(m2)'s
+        delta_q_array       ::   numpy.ndarray
+                                     1d array of delta q's
+        
+        delta_chi_array       ::   numpy.ndarray
+                                     1d array of delta chi_eff's
         
         m1_bins                 ::   numpy.ndarray
                                      1d array containing primary mass bin edges
         
-        m2_bins                 ::   numpy.ndarray
-                                     1d array containing secondary mass bin edges
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass-ratio bin edges
                 
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
         
-        chi_low                 ::   float 
-                                     upper edge of chi_eff bin
+        q_low                 ::   float 
+                                     lower edge of q bin
                                      
+        q_high                 ::   float 
+                                     upper edge of q bin
+        
         chi_low                 ::   float 
+                                     lower edge of chi_eff bin
+                                     
+        chi_high                 ::   float 
                                      upper edge of chi_eff bin
         
         
         Returns
         -------
         mass1     :   numpy.ndarray
-                      1d array of primary masses at which p(m1|chi_eff) is evaluated
+                      1d array of primary masses at which p(m1|q, chi_eff) is evaluated
         Rpm1      :   numpy.ndarray
-                      1d array of p(m1|chi_eff) evaluated at the above m1 values and
-                      at redshifts belonging to a particular range
+                      1d array of p(m1|q, chi_eff) evaluated at the above m1 values and
+                      at q, chieff belonging to a particular range
         
         '''
         Rpm1 = np.zeros([len(n_corr),1])
@@ -619,7 +626,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
     def get_Rpm1_q_corr(self,n_corr,delta_q_array,delta_chi_array,m1_bins,chi_bins,log_bin_centers,q_low,q_high):
         '''
-        Function for computing conditional primary mass population: p(m_1|z)
+        Function for computing conditional primary mass population: p(m_1|q)
         evaluated at redshifts belonging to some range
 
         Parameters
@@ -630,6 +637,9 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
         delta_q_array       ::   numpy.ndarray
                                      1d array of delta q's
+                                     
+        delta_chi_array       ::   numpy.ndarray
+                                     1d array of delta chieff's                             
 
         m1_bins                 ::   numpy.ndarray
                                      1d array containing primary mass bin edges
@@ -640,20 +650,20 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
 
-        z_low                   ::   float 
-                                     upper edge of redshift bin
+        q_low                   ::   float 
+                                     lower edge of q bin
 
-        z_low                   ::   float 
-                                     upper edge of redshift bin
+        q_high                   ::   float 
+                                     upper edge of q bin
 
 
         Returns
         -------
         mass1     :   numpy.ndarray
-                      1d array of primary masses at which p(m1|z) is evaluated
+                      1d array of primary masses at which p(m1|q) is evaluated
         Rpm1      :   numpy.ndarray
-                      1d array of p(m1|z) evaluated at the above m1 values and
-                      at redshifts belonging to a particular range
+                      1d array of p(m1|q) evaluated at the above m1 values and
+                      at mass-ratios belonging to a particular range
 
         '''
         Rpm1 = np.zeros([len(n_corr),1])
@@ -681,7 +691,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
     
     def get_Rpq_corr(self,n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,chi_low,chi_high):
         '''
-        Function for computing conditional primary mass population: p(m_2|chi_eff)
+        Function for computing conditional primary mass population: p(q|chi_eff)
         evaluated at chi_eff belonging to some range
         
         Parameters
@@ -690,14 +700,17 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         n_corr                  ::   numpy.ndarray
                                      array containing rate density in each bin
         
-        delta_logm2_array       ::   numpy.ndarray
-                                     1d array of delta log(m2)'s
+        delta_logm1_array       ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+        
+        delta_chi_array       ::   numpy.ndarray
+                                     1d array of delta chieff's
         
         m1_bins                 ::   numpy.ndarray
                                      1d array containing primary mass bin edges
         
-        m2_bins                 ::   numpy.ndarray
-                                     1d array containing secondary mass bin edges
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing secondary mass-ratio bin edges
                 
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
@@ -706,15 +719,15 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
                                      lower edge of chi_eff bin
                                      
         chi_high                ::   float 
-                                     upper edge of redshift bin
+                                     upper edge of chi_eff bin
         
         
         Returns
         -------
-        mass2     :   numpy.ndarray
-                      1d array of primary masses at which p(m2|z) is evaluated
-        Rpm2      :   numpy.ndarray
-                      1d array of p(m2|chi_eff) evaluated at the above m1 values and
+        mrat     :   numpy.ndarray
+                      1d array of primary masses at which p(q|chi_eff) is evaluated
+        Rpq      :   numpy.ndarray
+                      1d array of p(q|chi_eff) evaluated at the above m1 values and
                       at redshifts belonging to a particular range
         
         '''
@@ -739,7 +752,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
     def get_Rpq_corr_m1chi(self, n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,m1_low,m1_high,chi_low,chi_high):
         '''
-        Function for computing conditional primary mass population: p(m_1|z)
+        Function for computing conditional primary mass population: p(q|m1, chi_eff)
         evaluated at redshifts belonging to some range
 
         Parameters
@@ -748,32 +761,41 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         n_corr                  ::   numpy.ndarray
                                      array containing rate density in each bin
 
-        delta_logq_array       ::   numpy.ndarray
-                                     1d array of delta log(q)'s
+        delta_logm1_array       ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        delta_chi_array       ::   numpy.ndarray
+                                     1d array of delta chieff's                             
 
         m1_bins                 ::   numpy.ndarray
                                      1d array containing primary mass bin edges
 
         q_bins                 ::   numpy.ndarray
-                                     1d array containing secondary mass bin edges
+                                     1d array containing mass-ratio bin edges
 
         log_bin_centers         ::   numpy.ndarray
                                      array containing log of the centers of each bin
 
-        z_low                   ::   float 
-                                     upper edge of redshift bin
-
-        z_low                   ::   float 
-                                     upper edge of redshift bin
+        m1_low                 ::   float 
+                                     lower edge of mass bin
+                                     
+        m1_high                ::   float 
+                                     upper edge of mass bin
+                                     
+        chi_low                 ::   float 
+                                     lower edge of chi_eff bin
+                                     
+        chi_high                ::   float 
+                                     upper edge of chi_eff bin                             
 
 
         Returns
         -------
-        mass1     :   numpy.ndarray
-                      1d array of primary masses at which p(m1|z) is evaluated
-        Rpm1      :   numpy.ndarray
-                      1d array of p(m1|z) evaluated at the above m1 values and
-                      at redshifts belonging to a particular range
+        mrat     :   numpy.ndarray
+                      1d array of primary masses at which p(q|m1, chi_eff) is evaluated
+        Rpq      :   numpy.ndarray
+                      1d array of p(q|m1, chi_eff) evaluated at the above q values and
+                      at m1,chieff's belonging to a particular range
 
         '''
         Rpq = np.zeros([len(n_corr),1])
@@ -1182,11 +1204,11 @@ class Vt_Utils_spins_with_q(Utils_spins_with_q):
         mbins               :: numpy.ndarray 
                                1d array containing mass bin edges
         
-        zbins               :: numpy.ndarray
-                               1d array containing redshift bin edges.
-                            
-        include_spins       :: bool
-                               whether or not to reweight spin distributions
+        qbins :: numpy.ndarray 
+                 1d array containing mass-ratio bin edges
+        
+        chi_bins :: numpy.ndarray
+                 1d array containing effective spin bin edges.
         '''
         Utils_spins_with_q.__init__(self,mbins,qbins,chi_bins,kappa=kappa)
         self.arg_mat = construct_arg_mat_out_spins(mbins, qbins, chi_bins)
@@ -1338,21 +1360,24 @@ class Rates_spins_with_q(Utils_spins_with_q):
         mbins :: numpy.ndarray 
                  1d array containing mass bin edges
         
-        zbins :: numpy.ndarray
+        qbins :: numpy.ndarray 
+                 1d array containing mass-ratio bin edges
+        
+        chi_bins :: numpy.ndarray
+                 1d array containing effective spin bin edges.
         '''
         Utils_spins_with_q.__init__(self,mbins,qbins,chi_bins,kappa=kappa) 
     
     
     def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
         '''
-        Function that creates a pymc model that will sample the posterior in 
-        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
-        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+        Function that creates a pymc model that will sample the posterior 
+        for the correlated population model.
                 
         Parameters
         ----------
         log_bin_centers                  ::    numpy.ndarray
-                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               array containing centers of each bin in log m1, q, chi_eff co-ordinates.
                                                output of Utils.generate_log_bin_centers
         
         weights                          ::    numpy.ndarray
@@ -1361,7 +1386,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
         
         tril_vts                         ::    numpy.ndarray
                                                array containing mean values of emperically estimated VTs. First output of
-                                               Vt_Utils.compute_vts 
+                                               Vt_Utils_spins_with_q.compute_VTs 
         
         tril_deltaLogbins                ::    numpy.ndarray
                                                1d array containing delta_log_bin corresponding to each bin in the 
@@ -1373,30 +1398,37 @@ class Rates_spins_with_q(Utils_spins_with_q):
         ls_sd_m                          ::    float
                                                std of the mass axis of the lengthscale for the single GP..
                                                
-        ls_mean_z                        ::    float
-                                               mean of the redshift axis of the lengthscale for the single GP.
+        ls_mean_q                        ::    float
+                                               mean of the mass-ratio axis of the lengthscale for the single GP.
                                                
-        ls_sd_z                          ::    float
-                                               std of the redshift axis of the lengthscale for the single GP.
+        ls_sd_q                          ::    float
+                                               std of the mass-ratio axis of the lengthscale for the single GP.
+        
+        ls_mean_chi                        ::    float
+                                               mean of the chi_eff axis of the lengthscale for the single GP.
+                                               
+        ls_sd_chi                          ::    float
+                                               std of the chi_eff axis of the lengthscale for the single GP.
         
         sigma_sd                         ::    float
                                                std of the sigma for GP. Default is 10
         
-        mu_z_dim                         ::    int
+        mu_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
                                                or None. Default is None which corresponds to mu_dim = 
                                                number of bins.
         
         vt_sigmas                        ::    numpy.ndarray
                                                1d array containing std values of emperically estimated
-                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               VTs. Second output of Vt_Utils_spins_with_q.compute_VTs. Default is 
                                                None (Should not be None if vt_accuracy_check=True)
+        
         
         vt_accuracy_check                ::    bool
                                                Whether or not to implement marginalization of Monte 
                                                Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior on Eq. B11. If False 
-                                               (default), samples from the posterior in Eq. A6.
+                                               samples from the posterior. If False 
+                                               (default), samples from the posterior.
         
                                                
         
@@ -1411,6 +1443,8 @@ class Rates_spins_with_q(Utils_spins_with_q):
         if(len(np.where(~arg)[0])>0):
             tril_vts = tril_vts[np.where(arg)[0]]
             weights = weights[:,np.where(arg)[0]]
+            wt_means = wt_means[:,np.where(arg)[0]]
+            wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
             weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
         
         if vt_accuracy_check :
@@ -1432,16 +1466,16 @@ class Rates_spins_with_q(Utils_spins_with_q):
         assert nm == len(log_bin_centers)/nchi
         #assert nm == len(log_bin_centers)/nchi
         bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
-        log_bin_centers_m = log_bin_centers[0::nchi, :2][:,None]
+        log_bin_centers_m = log_bin_centers[0::nchi, :2]
+        print(bin_centers_chi)
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
             length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
             length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
             length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
-            covariance_m = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_m)
-            covariance_q = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_q)
-            covariance_chi = sigma ** (2/3) *pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_chi)
+            covariance_m = sigma * pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m, length_scale_q])
+            covariance_chi = sigma * pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_chi)
             gp = pm.gp.LatentKron(cov_funcs=[covariance_m, covariance_chi]) 
             logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_m, bin_centers_chi])
             logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
@@ -1457,14 +1491,13 @@ class Rates_spins_with_q(Utils_spins_with_q):
 
     def make_significant_model_3d_prior_only(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None):
         '''
-        Function that creates a pymc model that will sample the posterior in 
-        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
-        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+        Function that creates a pymc model that will sample the prior
+        for the correlated population model.
                 
         Parameters
         ----------
         log_bin_centers                  ::    numpy.ndarray
-                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               array containing centers of each bin in log m1, q, chi_eff co-ordinates.
                                                output of Utils.generate_log_bin_centers
         
         weights                          ::    numpy.ndarray
@@ -1473,7 +1506,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
         
         tril_vts                         ::    numpy.ndarray
                                                array containing mean values of emperically estimated VTs. First output of
-                                               Vt_Utils.compute_vts 
+                                               Vt_Utils_spins_with_q.compute_VTs 
         
         tril_deltaLogbins                ::    numpy.ndarray
                                                1d array containing delta_log_bin corresponding to each bin in the 
@@ -1485,30 +1518,46 @@ class Rates_spins_with_q(Utils_spins_with_q):
         ls_sd_m                          ::    float
                                                std of the mass axis of the lengthscale for the single GP..
                                                
-        ls_mean_z                        ::    float
-                                               mean of the redshift axis of the lengthscale for the single GP.
+        ls_mean_q                        ::    float
+                                               mean of the mass-ratio axis of the lengthscale for the single GP.
                                                
-        ls_sd_z                          ::    float
-                                               std of the redshift axis of the lengthscale for the single GP.
+        ls_sd_q                          ::    float
+                                               std of the mass-ratio axis of the lengthscale for the single GP.
+        
+        ls_mean_chi                        ::    float
+                                               mean of the chi_eff axis of the lengthscale for the single GP.
+                                               
+        ls_sd_chi                          ::    float
+                                               std of the chi_eff axis of the lengthscale for the single GP.
         
         sigma_sd                         ::    float
                                                std of the sigma for GP. Default is 10
         
-        mu_z_dim                         ::    int
+        mu_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
                                                or None. Default is None which corresponds to mu_dim = 
                                                number of bins.
         
         vt_sigmas                        ::    numpy.ndarray
                                                1d array containing std values of emperically estimated
-                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               VTs. Second output of Vt_Utils_spins_with_q.compute_VTs. Default is 
                                                None (Should not be None if vt_accuracy_check=True)
+        
+        wt_means                        ::    numpy.ndarray
+                                               array containing mean values of posterior weights.
+                                               Second output of Utils_spins_with_q.compute_weights. Default is 
+                                               None (shape is n_events,nbins).
+                                               
+        wt_sigmas                        ::    numpy.ndarray
+                                               array containing std values of posterior weights.
+                                               Third output of Utils_spins_with_q.compute_weights. Default is 
+                                               None (shape is n_events,nbins).
         
         vt_accuracy_check                ::    bool
                                                Whether or not to implement marginalization of Monte 
                                                Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior on Eq. B11. If False 
-                                               (default), samples from the posterior in Eq. A6.
+                                               samples from the posterior. If False 
+                                               (default), samples from the posterior.
         
                                                
         
@@ -1569,14 +1618,14 @@ class Rates_spins_with_q(Utils_spins_with_q):
     
     def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None, exponent = -30):
         '''
-        Function that creates a pymc model that will sample the posterior in 
-        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
-        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+        Function that creates a pymc model that will sample the posterior 
+        for the correlated population model, with an additional likelihood 
+        penalty imposed to improve Monte Carlo convergence.
                 
         Parameters
         ----------
         log_bin_centers                  ::    numpy.ndarray
-                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
+                                               array containing centers of each bin in log m1, q, chi_eff co-ordinates.
                                                output of Utils.generate_log_bin_centers
         
         weights                          ::    numpy.ndarray
@@ -1585,7 +1634,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
         
         tril_vts                         ::    numpy.ndarray
                                                array containing mean values of emperically estimated VTs. First output of
-                                               Vt_Utils.compute_vts 
+                                               Vt_Utils_spins_with_q.compute_VTs 
         
         tril_deltaLogbins                ::    numpy.ndarray
                                                1d array containing delta_log_bin corresponding to each bin in the 
@@ -1597,31 +1646,50 @@ class Rates_spins_with_q(Utils_spins_with_q):
         ls_sd_m                          ::    float
                                                std of the mass axis of the lengthscale for the single GP..
                                                
-        ls_mean_z                        ::    float
-                                               mean of the redshift axis of the lengthscale for the single GP.
+        ls_mean_q                        ::    float
+                                               mean of the mass-ratio axis of the lengthscale for the single GP.
                                                
-        ls_sd_z                          ::    float
-                                               std of the redshift axis of the lengthscale for the single GP.
+        ls_sd_q                          ::    float
+                                               std of the mass-ratio axis of the lengthscale for the single GP.
+        
+        ls_mean_chi                        ::    float
+                                               mean of the chi_eff axis of the lengthscale for the single GP.
+                                               
+        ls_sd_chi                          ::    float
+                                               std of the chi_eff axis of the lengthscale for the single GP.
         
         sigma_sd                         ::    float
                                                std of the sigma for GP. Default is 10
         
-        mu_z_dim                         ::    int
+        mu_dim                         ::    int
                                                number of mean functions for the GP. Can be 1
                                                or None. Default is None which corresponds to mu_dim = 
                                                number of bins.
         
         vt_sigmas                        ::    numpy.ndarray
                                                1d array containing std values of emperically estimated
-                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
+                                               VTs. Second output of Vt_Utils_spins_with_q.compute_VTs. Default is 
                                                None (Should not be None if vt_accuracy_check=True)
+        
+        wt_means                        ::    numpy.ndarray
+                                               array containing mean values of posterior weights.
+                                               Second output of Utils_spins_with_q.compute_weights. Default is 
+                                               None (shape is n_events,nbins).
+                                               
+        wt_sigmas                        ::    numpy.ndarray
+                                               1d array containing std values of posterior weights.
+                                               Third output of Utils_spins_with_q.compute_weights. Default is 
+                                               None (shape is n_events,nbins).                                              
         
         vt_accuracy_check                ::    bool
                                                Whether or not to implement marginalization of Monte 
                                                Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior on Eq. B11. If False 
-                                               (default), samples from the posterior in Eq. A6.
+                                               samples from the posterior. If False 
+                                               (default), samples from the posterior.
         
+        exponent                         ::    int
+        					 Exponent determining the steepness of
+        					 the step function for likelihood penalty. Default is -30.
                                                
         
         Returns

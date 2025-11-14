@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-__author__="Anarya Ray <anarya.ray@ligo.org>; Siddharth Mohite <siddharth.mohite@ligo.org>"
+__author__="Anarya Ray <anarya.ray@ligo.org>; Siddharth Mohite <siddharth.mohite@ligo.org>; Omkar Sridhar <omkar.sridhar@ligo.org>"
 
 
 import numpy as np
@@ -46,7 +46,7 @@ def reweight_pinjection(tril_weights):
     '''
     A function that converts log weights of injections to
     weights. Since each injection will have non-zero weights
-    in only one bin, the log weights (output of Vt_Utils.log_reweight_pinjection_mixture)
+    in only one bin, the log weights (output of Vt_Utils_spins_with_q.log_reweight_pinjection_mixture)
     are set to zero at all other bins. This function acts as a 
     wrapper around exp such that only non-zero log weights
     are exponentiated.
@@ -79,7 +79,7 @@ def construct_arg_mat_out_spins(mbins, qbins, chi_bins):
                  1d array containing mass bin edges
         
     qbins :: numpy.ndarray 
-                 1d array containing mass bin edges    
+                 1d array containing mass-ratio bin edges    
         
     chi_bins :: numpy.ndarray
                  1d array containing effective spin bin edges.
@@ -199,7 +199,7 @@ class Utils_spins_with_q():
         Parameters
         ----------
         samples            :: numpy.ndarray
-                              Array of m1,m2,z posterior samples.
+                              Array of m1,q,chieff posterior samples.
                               
         m1m2_given_z_prior :: numpy.ndarray
                               if default PE priors were not used then
@@ -401,9 +401,9 @@ class Utils_spins_with_q():
         '''
         Inverse of arraynd_to_tril() for a restricted
         range of primary masses, required for Pearson 
-        coefficient computation in post processing,
+        coefficient computation in Post_Proc_Utils_spins_with_q,
         Returns a n-D
-        represenation matrix of a given set of q-cut
+        representation matrix of a given set of q-cut
         1-D values or multiple sets of q-cut
         1-D values, one set corresponding to 
         each chieff bin.
@@ -454,7 +454,7 @@ class Utils_spins_with_q():
         -------
         
         delta_q_array : numpy.ndarray
-                        array of delta q's
+                        1d array of delta q's
         '''
         delta_q_array = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
         for i in range(len(self.mbins)-1):
@@ -493,7 +493,7 @@ class Utils_spins_with_q():
         -------
         
         delta_chi_array : numpy.ndarray
-                        array of delta chieff's
+                          1d array of delta chieff's
         '''
         delta_chi_array = np.zeros([len(self.mbins)-1,len(self.qbins)-1,len(self.chi_bins)-1])
         for i in range(len(self.mbins)-1):
@@ -533,8 +533,8 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
     def reshape_uncorr(self,n_corr,n_corr_chi):
         '''
         Function for combining uncorrelated mass and 
-        redshift rate densities into combined rate
-        densities (Eq. .
+        effective spin rate densities into combined rate
+        densities 
         
         Parameters
         ----------
@@ -543,7 +543,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
                     array containing rate-densities w.r.t. mass bins
         
         n_corr_chi :: numpy.ndarray
-                    array containing rate densities w.r.t. redshift bins
+                    array containing rate densities w.r.t. effective spin bins
                     
         
         Returns
@@ -563,7 +563,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
     def get_Rpm1_corr(self,n_corr,delta_q_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,q_low, q_high, chi_low,chi_high):
         '''
         Function for computing conditional primary mass population: p(m_1|q, chi_eff)
-        evaluated at redshifts belonging to some range
+        evaluated at mass-ratios and effective spins belonging to some range
         
         Parameters
         ----------
@@ -627,7 +627,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
     def get_Rpm1_q_corr(self,n_corr,delta_q_array,delta_chi_array,m1_bins,chi_bins,log_bin_centers,q_low,q_high):
         '''
         Function for computing conditional primary mass population: p(m_1|q)
-        evaluated at redshifts belonging to some range
+        evaluated at mass-ratios belonging to some range
 
         Parameters
         ----------
@@ -725,10 +725,10 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         Returns
         -------
         mrat     :   numpy.ndarray
-                      1d array of primary masses at which p(q|chi_eff) is evaluated
+                      1d array of mass-ratios at which p(q|chi_eff) is evaluated
         Rpq      :   numpy.ndarray
-                      1d array of p(q|chi_eff) evaluated at the above m1 values and
-                      at redshifts belonging to a particular range
+                      1d array of p(q|chi_eff) evaluated at the above q values and
+                      at chieff's belonging to a particular range
         
         '''
         Rpq = np.zeros([len(n_corr),1])
@@ -752,8 +752,8 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
     def get_Rpq_corr_m1chi(self, n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,m1_low,m1_high,chi_low,chi_high):
         '''
-        Function for computing conditional primary mass population: p(q|m1, chi_eff)
-        evaluated at redshifts belonging to some range
+        Function for computing conditional mass-ratio population: p(q|m1, chi_eff)
+        evaluated at primary masses and effective spins belonging to some range
 
         Parameters
         ----------
@@ -792,7 +792,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         Returns
         -------
         mrat     :   numpy.ndarray
-                      1d array of primary masses at which p(q|m1, chi_eff) is evaluated
+                      1d array of mass-ratios at which p(q|m1, chi_eff) is evaluated
         Rpq      :   numpy.ndarray
                       1d array of p(q|m1, chi_eff) evaluated at the above q values and
                       at m1,chieff's belonging to a particular range
@@ -933,7 +933,43 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
 
 
-    def get_pearson_coeff_mass_range_with_q_alt(self, n_corr, dm1, dq, dchi, log_bin_centers, m_min, m_max):
+    def get_pearson_coeff_mass_range_with_q(self, n_corr, dm1, dq, dchi, log_bin_centers, m_min, m_max):
+        '''
+        Function for computing Pearson correlation coefficient 
+        between effective spin and mass-ratio for a given m1 range
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dq                      ::   numpy.ndarray
+                                     1d array of delta q's
+                                     
+        dchi                    ::   numpy.ndarray
+                                     1d array of delta chieff's
+                              
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the m1 range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the m1 range
+        
+        
+        Returns
+        -------
+        rho_m1_range    :   numpy.ndarray
+                      	     1d array of Pearson correlation coefficient 
+                      	     between effective spin and mass-ratio
+                      	     for a given m1 range
+        '''
         rho_m1_range = []
         
         nbins_m = len(self.mbins)-1
@@ -990,6 +1026,39 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
 
     def get_pearson_coeff_mass_marg_with_q(self, n_corr, dm1, dq, dchi, log_bin_centers):
+    	'''
+        Function for computing Pearson correlation coefficient 
+        between effective spin and mass-ratio marginalized 
+        across m1 bins
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dq                      ::   numpy.ndarray
+                                     1d array of delta q's
+                                     
+        dchi                    ::   numpy.ndarray
+                                     1d array of delta chieff's
+                              
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        
+        Returns
+        -------
+        rho_m1_full    :   numpy.ndarray
+                      	     1d array of Pearson correlation coefficient 
+                      	     between effective spin and mass-ratio
+                      	     marginalized across m1 bins
+        '''
+    	
+    	
     	rho_m1_full = []
     	
     	nbins_m = len(self.mbins)-1
@@ -1029,6 +1098,43 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
     
 
     def get_pearson_coeff_chi_range_with_q(self, n_corr, dm1, dq, dchi, log_bin_centers, chi_min, chi_max):
+        '''
+        Function for computing Pearson correlation coefficient 
+        between primary mass and mass-ratio for a given chieff range
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dq                      ::   numpy.ndarray
+                                     1d array of delta q's
+                                     
+        dchi                    ::   numpy.ndarray
+                                     1d array of delta chieff's
+                              
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        chi_min                   ::   float 
+                                     lower edge of the chieff range
+                                     
+        chi_max                   ::   float 
+                                     upper edge of the chieff range
+        
+        
+        Returns
+        -------
+        rho_chi_range    :   numpy.ndarray
+                      	     1d array of Pearson correlation coefficient 
+                      	     between primary mass and mass-ratio
+                      	     for a given chieff range
+        '''
+        
         rho_chi_range = []
         
         nbins_m = len(self.mbins)-1
@@ -1084,6 +1190,44 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
 
     def get_pearson_coeff_chi_marg_with_q(self, n_corr, dm1, dq, dchi, log_bin_centers):
+        '''
+        Function for computing Pearson correlation coefficient 
+        between primary mass and mass-ratio 
+        marginalized across chieff bins
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        dq                      ::   numpy.ndarray
+                                     1d array of delta q's
+                                     
+        dchi                    ::   numpy.ndarray
+                                     1d array of delta chieff's
+                              
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the m1 range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the m1 range
+        
+        
+        Returns
+        -------
+        rho_chi_full    :   numpy.ndarray
+                      	     1d array of Pearson correlation coefficient 
+                      	     between primary mass and mass-ratio
+                      	     marginalized across chieff bins
+        '''
+        
         rho_chi_full = []
         
         nbins_m = len(self.mbins)-1
@@ -1121,8 +1265,38 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         return rho_chi_full
 
 
-    def get_two_d_q_chi_with_q_alt(self, n_corr, dm1, m_min, m_max, log_bin_centers):
+    def get_two_d_q_chi_with_q(self, n_corr, dm1, m_min, m_max, log_bin_centers):
+        '''
+        Function for computing 2d median merger rate density 
+        between effective spin and mass-ratio for a given m1 range
 
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dm1                     ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                              
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        m_min                   ::   float 
+                                     lower edge of the m1 range
+                                     
+        m_max                   ::   float 
+                                     upper edge of the m1 range
+        
+        
+        Returns
+        -------
+        matrix1    :        numpy.ndarray
+                      	     1d array of 2d median merger rate density 
+                      	     between effective spin and mass-ratio
+                      	     for a given m1 range
+        '''
+        
         nbins_m = len(self.mbins)-1
         nbins_q = len(self.qbins) - 1
         nbins_chi = len(self.chi_bins)-1
@@ -1155,6 +1329,37 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
     def get_two_d_m_q_with_q(self, n_corr, dchi, chi_min, chi_max, log_bin_centers):
     	
+        '''
+        Function for computing 2d median merger rate density 
+        between effective spin and mass-ratio for a given chieff range
+
+        Parameters
+        ----------
+        
+        n_corr_samples          ::   numpy.ndarray
+                                     array containing rate density in each bin
+        
+        dchi                    ::   numpy.ndarray
+                                     1d array of delta chieff's
+                              
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+        
+        chi_min                   ::   float 
+                                     lower edge of the chieff range
+                                     
+        chi_max                   ::   float 
+                                     upper edge of the chieff range
+        
+        
+        Returns
+        -------
+        matrix1    :        numpy.ndarray
+                      	     1d array of 2d median merger rate density 
+                      	     between primary mass and mass-ratio
+                      	     for a given chieff range
+        '''
+        
         nbins_m = len(self.mbins)-1
         nbins_q = len(self.qbins) - 1
         nbins_chi = len(self.chi_bins)-1
@@ -1294,8 +1499,8 @@ class Vt_Utils_spins_with_q(Utils_spins_with_q):
     
     def compute_VTs(self,inj_data_set,thresh,key = 'optimal_snr_net',log_p_s1s2=None ):
         '''
-        Function that implements Eqs. B7 and B8 of https://arxiv.org/abs/2304.08046
-        to calculate mean and std of emperically estimated volume-time sensitivity.
+        Function that implements calculation of mean 
+        and std of emperically estimated volume-time sensitivity.
         
         Parameters
         ----------

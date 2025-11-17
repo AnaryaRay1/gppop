@@ -104,7 +104,7 @@ class Utils_spins():
         entries (m2<=m1) of a collection of 2d matrices
         each binned by m1 and m2. For the m1,m2,z inference,
         it returns multiple sets of lower triangular (m2<=m1) 
-        entries, one set corresponding to each redshift bin.
+        entries, one set corresponding to each effective spin bin.
         Uses numpy's tril_indices function.
 
         Parameters
@@ -297,7 +297,7 @@ class Utils_spins():
         represenation matrix of a given set of the lower
         triangular 1-D values or multiple sets of lower 
         triangular 1D values, one set corresponding to 
-        each redshift bin.
+        each effective spin bin.
 
         Parameters
         ----------
@@ -306,7 +306,7 @@ class Utils_spins():
         nbins_m : int
             number of mass bins
         nbins_chi : int
-            number of redshift bins
+            number of effective spin bins
             
         Returns
         -------
@@ -643,13 +643,13 @@ class Post_Proc_Utils_spins(Utils_spins):
                                      lower edge of chi_eff bin
                                      
         chi_high                ::   float 
-                                     upper edge of redshift bin
+                                     upper edge of chi_eff bin
         
         
         Returns
         -------
         mass2     :   numpy.ndarray
-                      1d array of primary masses at which p(m2|z) is evaluated
+                      1d array of primary masses at which p(m2|chi_eff) is evaluated
         Rpm2      :   numpy.ndarray
                       1d array of p(m2|chi_eff) evaluated at the above m1 values and
                       at effective spins belonging to a particular range
@@ -1566,7 +1566,6 @@ class Rates_spins(Utils_spins):
         assert nm == len(log_bin_centers)/nchi
         bin_centers_chi = log_bin_centers[0::nm,2][:,None]
         log_bin_centers_m = log_bin_centers[:nm,:2]
-        k = 0
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)

@@ -1667,7 +1667,6 @@ class Rates_spins_with_q(Utils_spins_with_q):
         #assert nm == len(log_bin_centers)/nchi
         bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
         log_bin_centers_m = log_bin_centers[0::nchi, :2]
-        print(bin_centers_chi)
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
@@ -1796,7 +1795,6 @@ class Rates_spins_with_q(Utils_spins_with_q):
         #assert nm == len(log_bin_centers)/nchi
         bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
         log_bin_centers_m = log_bin_centers[0::nchi, :2]
-        print(bin_centers_chi)
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
@@ -1927,7 +1925,6 @@ class Rates_spins_with_q(Utils_spins_with_q):
         #assert nm == len(log_bin_centers)/nchi
         bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
         log_bin_centers_m = log_bin_centers[0::nchi, :2]
-        print(bin_centers_chi)
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)

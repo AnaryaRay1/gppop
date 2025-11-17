@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import argparse
-from gppop import core, io
+from gppop import core_m1qchi
 import numpy as np
 import pymc as pm
 import os
@@ -14,16 +14,17 @@ except ModuleNotFoundError as e:
     print("JAX not installed, falling back to normal sampling")
     nojax = True
 
+os.chdir('../examples/BGP_m1qchi/data/')
 np.random.seed(123456)
 parser = argparse.ArgumentParser(description = 'Fit the Gaussian Process model to the observed source population.', formatter_class = argparse.ArgumentDefaultsHelpFormatter, fromfile_prefix_chars='@')
-parser.add_argument('--config', type = str, required = True, metavar = 'CONFIG', help = 'path to config file')
+parser.add_argument('--config', type = str, required = True, metavar = 'CONFIG', help = 'name of config file')
 parser.add_argument('--ntune', type = int, required = True, metavar = 'NTUNE', help = 'Number of tuning steps for the sampler.')
 parser.add_argument('--nsteps', type = int, required = True, metavar = 'NSTEPS', help = 'Number of steps to sample post tuning.')
 parser.add_argument('--target_accept', type = float, required = True, metavar = 'TARGET_ACCEPT', help = 'Target acceptance fraction for the sampler.')
 parser.add_argument('--njobs', type = int, required = True, metavar = 'TARGET_ACCEPT', help = 'number of chains to run sampling for')
 parser.add_argument('--jax_sampling', required = False, metavar = 'JAX_SAMPLING', help = 'whether to use jax sampling or not',type=bool,default=False)
-parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=10)
-parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=None)
+parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=1.)
+parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=1)
 parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
 parser.add_argument('--meta_file', required = False, metavar = 'path to popsummary metafile.', help = 'If provided, only output will be overwritten',type=bool,default=None)
 args= parser.parse_args()
@@ -31,19 +32,11 @@ args= parser.parse_args()
 with open(args.config, "r") as stream:
     config = yaml.full_load(stream)
 
-if args.meta_file is None:
-    io.create_metafile(np.array(config['mbins']),np.array(config['qbins']),np.array(config['chi_bins']),config['meta_file'],config['nsamples'], 
-                         config['injection_file'], config['injection_keys'], config['threshold'], config['threshold_keys'],
-                         event_dict = config['event_dict'],
-                         pe_summary_event_dict = config['pe_summary_event_dict'],
-                         analysis_type = config['analysis_type'])
-else:
-    pass
 
-mbins, qbins, chi_bins = np.array(config['mbins']),np.array(config['qbins'],np.array(config['chi_bins'])
+mbins, qbins, chi_bins = np.array(config['mbins']),np.array(config['qbins']),np.array(config['chi_bins'])
 
-utils = core.Utils_spins_with_q(mbins,qbins, chi_bins, kappa = 2.7)
-rates = core.Rates_spins_with_q(mbins,qbins, chi_bins, kappa = 2.7)
+utils = core_m1qchi.Utils_spins_with_q(mbins,qbins, chi_bins, kappa = 2.7)
+rates = core_m1qchi.Rates_spins_with_q(mbins,qbins, chi_bins, kappa = 2.7)
 
 log_bin_centers = utils.generate_log_bin_centers()
 deltaLogbin = utils.deltaLogbin()
@@ -51,7 +44,7 @@ tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin, utils.construct_arg_mat())
 
 with h5py.File(config['meta_file'],'r') as hf:
     gppop_data = hf['gppop_metadata']
-    weights, total_vts, total_vt_sigmas, wt_means, wt_sigmas = gppop_data['posterior_weights'][()], gppop_data['vt_means'][()], gppop_data['vt_sigmas'][()], gppop_data['wt_means'][()], gppop_data['wt_sigmas'][()]
+    weights, total_vts, total_vt_sigmas, wt_means, wt_sigmas = gppop_data['posterior_weights'][()], gppop_data['vts'][()], gppop_data['vt_sigmas'][()], gppop_data['wt_means'][()], gppop_data['wt_sigmas'][()]
 
 
 nbins = len(log_bin_centers)
@@ -116,9 +109,8 @@ with gp_model:
     else:
         trace = pm.sample(draws=args.nsteps,tune=args.ntune,chains=args.njobs,target_accept=args.target_accept,discard_tuned_samples=True)
 
+out_dir = '../output/'
+if not(os.path.exists(out_dir)):
+    os.makedirs(out_dir)
+trace.to_netcdf('../output/gppop_GWTC4_posterior_newbins3_kappa_corr_m1qchi.nc')
 
-trace.to_netcdf('gppop_posterior.nc')
-
-io.write_results_to_metafile(config['meta_file'] if args.meta_file is None else args.meta_file, 'gppop_posterior.nc', config['n_draw_pe'], config['n_draw_inj'], config['n_draw_pred'], overwrite = True, include_spins = True)
-
-os.remove('gppop_posterior.nc')

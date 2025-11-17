@@ -7,33 +7,24 @@ import os
 import sys
 import yaml
 import h5py
-try:
-    from pymc import sampling_jax
-except ModuleNotFoundError as e:
-    print(e)
-    print("JAX not installed, falling back to normal sampling")
-    nojax = True
+
 
 os.chdir('../examples/BGP_m1m2z/data/')
 np.random.seed(123456)
 parser = argparse.ArgumentParser(description = 'Fit the Gaussian Process model to the observed source population.', formatter_class = argparse.ArgumentDefaultsHelpFormatter, fromfile_prefix_chars='@')
-parser.add_argument('--config', type = str, required = True, metavar = 'CONFIG', help = 'name of config file')
+parser.add_argument('--metadata', type = str, required = True, metavar = 'METADATA', help = 'name of metadata file')
 parser.add_argument('--ntune', type = int, required = True, metavar = 'NTUNE', help = 'Number of tuning steps for the sampler.')
 parser.add_argument('--nsteps', type = int, required = True, metavar = 'NSTEPS', help = 'Number of steps to sample post tuning.')
 parser.add_argument('--target_accept', type = float, required = True, metavar = 'TARGET_ACCEPT', help = 'Target acceptance fraction for the sampler.')
 parser.add_argument('--njobs', type = int, required = True, metavar = 'TARGET_ACCEPT', help = 'number of chains to run sampling for')
-parser.add_argument('--jax_sampling', required = False, metavar = 'JAX_SAMPLING', help = 'whether to use jax sampling or not',type=bool,default=False)
 parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=1.)
 parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=1)
 parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
-parser.add_argument('--meta_file', required = False, metavar = 'path to popsummary metafile.', help = 'If provided, only output will be overwritten',type=bool,default=None)
 args= parser.parse_args()
 
-with open(args.config, "r") as stream:
-    config = yaml.full_load(stream)
-
-
-mbins, zbins = np.array(config['mbins']),np.array(config['zbins'])
+with h5py.File(args.metadata,'r') as hf:
+    gppop_data = hf['gppop_metadata']
+    mbins, zbins, scales_m, scales_z, weights, total_vts, vt_means,total_vt_sigmas, wt_means, wt_sigmas = gppop_data['mbins'][()],gppop_data['zbins'][()],gppop_data['scales_m'][()],gppop_data['scales_z'][()], gppop_data['posterior_weights'][()],gppop_data['vts'][()],gppop_data['vt_means'][()], gppop_data['vt_sigmas'][()], gppop_data['wt_means'][()], gppop_data['wt_sigmas'][()]
 
 utils = core_m1m2z.Utils(mbins,zbins)
 rates = core_m1m2z.Rates(mbins,zbins)
@@ -42,59 +33,17 @@ log_bin_centers = utils.generate_log_bin_centers()
 deltaLogbin = utils.deltaLogbin()
 tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin)
 
-with h5py.File(config['meta_file'],'r') as hf:
-    gppop_data = hf['gppop_metadata']
-    weights, total_vts, total_vt_sigmas, wt_means, wt_sigmas = gppop_data['posterior_weights'][()], gppop_data['vts'][()], gppop_data['vt_sigmas'][()], gppop_data['wt_means'][()], gppop_data['wt_sigmas'][()]
-
-
-nbins = len(log_bin_centers)
-nbins_m = len(mbins)-1
-nbins_m = nbins_m *(nbins_m + 1) / 2 
-nbins_z = len(zbins)-1
-
-dist_array = np.zeros(int(nbins_m*(nbins_m+1)))
-
-z_bin_centers = 0.5 * (zbins[1:] + zbins[:-1])
-logm_bin_centers = 0.5 * (np.log(mbins[1:]) + np.log(mbins[:-1]))
-k=0
-for i in range(len(logm_bin_centers)):
-    for j in range(i+1):
-        dist_array[k] = np.linalg.norm(logm_bin_centers[i]-logm_bin_centers[j])
-        k+=1
-
-scale_min = np.log(np.min(dist_array[dist_array!=0.]))
-scale_max = np.log(np.max(dist_array))
-scale_mean_m = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
-scale_sd_m = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
-
-dist_array = np.zeros(int(nbins_z*(nbins_z+1)))
-k=0
-for i in range(len(z_bin_centers)):
-    for j in range(i+1):
-        dist_array[k] = np.linalg.norm(z_bin_centers[i]-z_bin_centers[j])
-        k+=1
-
-scale_min = np.log(np.min(dist_array[dist_array!=0.]))
-scale_max = np.log(np.max(dist_array))
-scale_mean_z = 0.5*(scale_min + scale_max) # chosen to give coverage over the bin-grid
-scale_sd_z = (scale_max - scale_min)/4 # fix 3-sigma difference to the sd of the length scale dist
 
 corr_posterior_model = rates.make_significant_model_3d_n_eff_opt
 
 
-if config['analysis_type'] != 'uncor':
-    gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check, wt_means = wt_means, wt_sigmas = wt_sigmas)
+gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scales_m[0],ls_sd_m=scales_m[1],ls_mean_z=scales_z[0],ls_sd_z=scales_z[1], sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check, wt_means = wt_means, wt_sigmas = wt_sigmas)
 
-else:
-    gp_model = rates.make_significant_model_3d_prior_only(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scale_mean_m,ls_sd_m=scale_sd_m,ls_mean_z=scale_mean_z,ls_sd_z=scale_sd_z, sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check, wt_means = wt_means, wt_sigmas = wt_sigmas)
 
 
 print('start sampling posterior')
 with gp_model:
-    if args.jax_sampling and not nojax:
-        trace = pm.sampling_jax.sample_numpyro_nuts(draws=args.nsteps,tune=args.ntune,chains=1 ,target_accept=args.target_accept)
-    else:
-        trace = pm.sample(draws=args.nsteps,tune=args.ntune,chains=args.njobs,target_accept=args.target_accept,discard_tuned_samples=True)
+    trace = pm.sample(draws=args.nsteps,tune=args.ntune,chains=args.njobs,target_accept=args.target_accept,discard_tuned_samples=True)
 
 out_dir = '../output/'
 if not(os.path.exists(out_dir)):

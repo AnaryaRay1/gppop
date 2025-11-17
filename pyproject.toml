@@ -6,11 +6,13 @@ readme = "README.md" # Optional
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
 authors = [
-  {name = "Anarya Ray", email = "anarya@uwm.edu" },
-  {name = "Siddharth Mohite", email = "srmohite@uwm.edu" } # Optional
+  {name = "Anarya Ray", email = "anarya@uwm.edu" }
+  {name = "Siddharth Mohite", email = "srmohite@uwm.edu" }
+  {name = "Omkar Sridhar", email = "omkarnm1401@gmail.com" } # Optional
 ]
 maintainers = [
-  {name = "Anarya Ray", email = "anarya@uwm.edu" } # Optional
+  {name = "Anarya Ray", email = "anarya@uwm.edu" }
+  {name = "Omkar Sridhar", email = "omkarnm1401@gmail.com" } # Optional
 ]
 
 dependencies = [ # Optional
@@ -27,7 +29,9 @@ dependencies = [ # Optional
 ]
 
 [tool.poetry.scripts]
-"run_gppop" = {source = "bin/run_gppop"}
+"run_gppop_m1m2z" = {source = "bin/run_gppop_m1m2z"}
+"run_gppop_m1m2chi" = {source = "bin/run_gppop_m1m2chi"}
+"run_gppop_m1qchi" = {source = "bin/run_gppop_m1qchi"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

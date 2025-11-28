@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-__author__="Anarya Ray <anarya.ray@ligo.org>; Siddharth Mohite <siddharth.mohite@ligo.org>; Omkar Sridhar <omkar.sridhar@ligo.org>"
+__author__="Omkar Sridhar <omkar.sridhar@ligo.org>; Anarya Ray <anarya.ray@ligo.org>; Siddharth Mohite <siddharth.mohite@ligo.org>"
 
 
 import numpy as np

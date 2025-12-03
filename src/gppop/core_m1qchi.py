@@ -823,7 +823,8 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         print(Rpq.shape)
         return mrat,Rpq[:,1:]
 
-    def get_Rpchi_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dm2,q_min,q_max):
+
+    def get_Rpchi_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,q_min,q_max):
         '''
         Function for computing p(chi_eff|q) for q values belonging in some range.
 
@@ -861,23 +862,6 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
                       1d array of p(chi_eff|q) evaluated at the above chi_eff values
                       and at mass-ratios belonging to a particular range
         '''
-        diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
-        ones = np.ones(len(dm2))
-        ones[diag_idx]*=2.
-        nbins_chi = len(chi_bins)-1
-        Rp_chi,chi = np.zeros((len(n_corr_samples),1)),np.array([ ])
-        for i in range(nbins_chi):
-            idx_array = np.arange(len(log_bin_centers))
-            bin_idx = idx_array[(log_bin_centers[:,1]<=log_bin_centers[:,0]+np.log(q_max))&(log_bin_centers[:,1]>log_bin_centers[:,0]+np.log(q_min))&(log_bin_centers[:,2]>=chi_bins[i])&(log_bin_centers[:,2]<=chi_bins[i+1])]
-            this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dm2[None,:]*ones[None,:])[:,bin_idx],axis=-1)
-            
-            this_chi = np.linspace(chi_bins[i],chi_bins[i+1],100)
-            chi=np.append(chi,this_chi)
-            Rp_chi = np.concatenate((Rp_chi,np.ones(100)[None,:]*this_Rp_chi[:,None]),axis=1)
-
-        return chi, Rp_chi[:,1:]
-
-    def get_Rpchi_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,q_min,q_max):
         diag_idx = np.where(log_bin_centers[:,0] == log_bin_centers[:,1])[0]
         ones = np.ones(len(dq))
         #ones[diag_idx]*=2.
@@ -1385,6 +1369,58 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         #print(p_avg)
         matrix1 = np.sum(p_avg, axis = 2)
         return matrix1
+
+    def get_pm1qchi(self,n_corr,n_sum_bin, m1s,qs,chis,zs,tril_edges):
+        '''
+        Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
+        m1,m2,z. Implements Eq.2 or Eq.8 of https://arxiv.org/pdf/2304.08046.pdf
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     2d array containing rate density samples in each bin
+                                     of shape (nsamples,nbins)
+                                     
+        m1s                     ::   numpy.ndarray
+                                     1d array containing values of primary mass m1 at which to evalute p(m1,m2,z)
+                                     
+        m2s                     ::   numpy.ndarray
+                                     1d array containing values of secondary mass m2 at which to evalute p(m1,m2,z)
+        
+        zs                      ::   numpy.ndarray
+                                     1d array containing values of redshift z at which to evalute p(m1,m2,z)
+        
+        tril_edges              ::   numpy.ndarray
+                                     array containing values of m1 bin edges in lower triangular format
+                                     (output of Utils.tril_edges() function)
+        
+        Returns
+        -------
+        
+        p_m1m2z   : numpy.ndarray
+                    1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
+        '''
+        dl_values = Planck15.luminosity_distance(zs).to(u.Gpc).value
+        arg_mat = self.construct_arg_mat()
+        arg_mat_flat = np.matrix.flatten(arg_mat)
+        args = np.where(arg_mat_flat > 0)[0]
+
+        tril_edges = tril_edges[args]
+
+        idx_array = np.arange(len(tril_edges))
+        #print(len(tril_edges))
+        bin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
+                   (tril_edges[:,0,1]<=q)&(tril_edges[:,1,1]>=q)&(tril_edges[:,0,2]<=chi)&(tril_edges[:,1,2]>=chi)] for m1,q,chi in zip(m1s,qs,chis)]
+        #print(len(bin_idx))
+        index_array = np.array([i for i, bi in enumerate(bin_idx) if len(bi)>0])
+        bin_idx = np.array([bi[0] for bi in bin_idx  if len(bi)>0])
+        #n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
+        n_corr_at_idx = np.zeros((len(m1s)))
+    
+        n_corr_at_idx[index_array] = n_corr[bin_idx]
+        p_m1qchi = n_corr_at_idx/n_sum_bin * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value*(1+zs) ** (self.kappa - 1))/(m1s ** 2)/len(n_corr)
+        return p_m1qchi
     
 class Vt_Utils_spins_with_q(Utils_spins_with_q):    
     """

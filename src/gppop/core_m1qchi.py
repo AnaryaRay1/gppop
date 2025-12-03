@@ -904,7 +904,8 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         for i in range(nbins_chi):
             idx_array = np.arange(len(log_bin_centers))
             bin_idx = idx_array[(((log_bin_centers[:,0]<=np.log(m_max))&
-                                (log_bin_centers[:,0]>=np.log(m_min))))&
+                                (log_bin_centers[:,0]>=np.log(m_min))))&(log_bin_centers[:,1]>=q_min)&
+                                (log_bin_centers[:,1]<=q_max)&
                                 (log_bin_centers[:,2]>=chi_bins[i])&
                                 (log_bin_centers[:,2]<=chi_bins[i+1])]
             this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)
@@ -924,7 +925,8 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         for i in range(nbins_chi):
             idx_array = np.arange(len(log_bin_centers))
             bin_idx = idx_array[(~(((log_bin_centers[:,0]<=np.log(m_max))&
-                        (log_bin_centers[:,0]>=np.log(m_min)))))&
+                        (log_bin_centers[:,0]>=np.log(m_min)))))&(log_bin_centers[:,1]>=q_min)&
+                        (log_bin_centers[:,1]<=q_max)&
                         (log_bin_centers[:,2]>=chi_bins[i])&
                         (log_bin_centers[:,2]<=chi_bins[i+1])]
             this_Rp_chi = np.sum((n_corr_samples*dm1[None,:]*dq[None,:]*ones[None,:])[:,bin_idx],axis=-1)

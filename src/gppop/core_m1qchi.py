@@ -360,7 +360,7 @@ class Utils_spins_with_q():
         return log_lower_tri_sorted[np.where(arg_mat_flat > 0)[0]]
             
                 
-    def construct_1dtond_matrix(self,nbins_m,values,nbins_chi, nbins_q, tril=True):
+    def construct_1dtond_matrix(self,nbins_m, values,nbins_chi, nbins_q, m_min = None, m_max = None, arg_mat = None, tril=True):
         '''
         Inverse of arraynd_to_tril() Returns a n-D
         represenation matrix of a given set of q-cut
@@ -389,50 +389,14 @@ class Utils_spins_with_q():
             matrix = np.zeros((nbins_m,nbins_q,nbins_chi)+values.shape[1:])
         else:
             matrix = np.zeros((nbins_m,nbins_q,nbins_chi))
+	
+        if np.sum(arg_mat) == None:
+            arg_mat = self.construct_arg_mat()
 
-        arg_mat = self.construct_arg_mat()
-        for i in range(nbins_m):
-            for j in range(nbins_q):
-                for l in range(nbins_chi):
-                    if arg_mat[i, j, l] > 0:
-                        matrix[i,j,l] = values[k]
-                        k+=1
-            
-        return matrix
-
-    def construct_1dtond_matrix_small(self,nbins_m, m_min, m_max,values,nbins_chi, nbins_q, arg_mat, tril=True):
-        '''
-        Inverse of arraynd_to_tril() for a restricted
-        range of primary masses, required for Pearson 
-        coefficient computation in Post_Proc_Utils_spins_with_q,
-        Returns a n-D
-        representation matrix of a given set of q-cut
-        1-D values or multiple sets of q-cut
-        1-D values, one set corresponding to 
-        each chieff bin.
-
-        Parameters
-        ----------
-        values : numpy.ndarray
-            1-D array of lower triangular entries.
-        nbins_m : int
-            number of mass bins
-        nbins_chi : int
-            number of chieff bins
-        nbins_q : int
-            number of mass-ratio bins
-            
-        Returns
-        -------
-        matrix : numpy.ndarray
-            n-D symmetric array using values.
-        '''
-        k=0
-        if len(values.shape)>1:
-            matrix = np.zeros((nbins_m,nbins_q,nbins_chi)+values.shape[1:])
-        else:
-            matrix = np.zeros((nbins_m,nbins_q,nbins_chi))
-
+        if m_min == None:
+            m_min = self.mbins[0]
+            m_max = self.mbins[-1]
+	
         log_m1_bin_centers = 0.5 * (np.log(self.mbins[1:]) + np.log(self.mbins[:-1]))
         bin_idx = np.arange(len(log_m1_bin_centers))
         idx_arr = bin_idx[(log_m1_bin_centers >= np.log(m_min))&(log_m1_bin_centers <= np.log(m_max))]
@@ -447,6 +411,7 @@ class Utils_spins_with_q():
             
         return matrix
 
+    
     def delta_q(self):
         '''
         A function that returns delta q for each bin in the
@@ -990,7 +955,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         
         Q, CHI = np.meshgrid(qbin_centers, chi_bin_centers, indexing='ij')
         arg_mat = self.construct_arg_mat()
-        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix_small(len(mbin_chosen), m_min, m_max, v,nbins_chi, nbins_q, arg_mat),axis=1,arr=rate_density_array * delta_ms * delta_qs * delta_chis)
+        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix(len(mbin_chosen), v,nbins_chi, nbins_q, m_min, m_max, arg_mat),axis=1,arr=rate_density_array * delta_ms * delta_qs * delta_chis)
         
         P_qchi = rate_density_4d.mean(axis=1)
         P_qchi /= P_qchi.sum(axis=(1,2), keepdims=True)   # (N, B, C)
@@ -1059,7 +1024,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
 
         Q, CHI = np.meshgrid(qbin_centers, chi_bin_centers, indexing='ij')
         arg_mat = self.construct_arg_mat()
-        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix_small(nbins_m, m_min, m_max,v,nbins_chi, nbins_q, arg_mat),axis=1,arr=n_corr * dm1 * dq * dchi)
+        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix(nbins_m,v,nbins_chi, nbins_q, m_min, m_max, arg_mat),axis=1,arr=n_corr * dm1 * dq * dchi)
         
         P_qchi = rate_density_4d.mean(axis=1)
         P_qchi /= P_qchi.sum(axis=(1,2), keepdims=True)   # (N, B, C)
@@ -1152,7 +1117,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         M, Q = np.meshgrid(m1_bin_centers, qbin_centers, indexing='ij')
             
         arg_mat = self.construct_arg_mat()
-        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix_small(nbins_m, m_min, m_max, v,len(chi_bin_chosen), nbins_q, arg_mat),axis=1,arr=rate_density_array * delta_ms * delta_qs * delta_chis)
+        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix(nbins_m, v,len(chi_bin_chosen), nbins_q, m_min, m_max, arg_mat),axis=1,arr=rate_density_array * delta_ms * delta_qs * delta_chis)
         
         P_mq = rate_density_4d.mean(axis=-1)
         P_mq /= P_mq.sum(axis=(1,2), keepdims=True)   # (N, B, C)
@@ -1227,7 +1192,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         M, Q = np.meshgrid(m1_bin_centers, qbin_centers, indexing='ij')
             
         arg_mat = self.construct_arg_mat()
-        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix_small(nbins_m, m_min, m_max, v,nbins_chi, nbins_q, arg_mat),axis=1,arr=n_corr * dm1 * dq * dchi)
+        rate_density_4d = np.apply_along_axis(lambda v: self.construct_1dtond_matrix(nbins_m, v,nbins_chi, nbins_q, m_min, m_max, arg_mat),axis=1,arr=n_corr * dm1 * dq * dchi)
         
         P_mq = rate_density_4d.mean(axis=-1)
         P_mq /= P_mq.sum(axis=(1,2), keepdims=True)   # (N, B, C)
@@ -1302,7 +1267,7 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         #print(np.where(p_avg_m1qchi * delta_ms == 0.0)[0])
 
         arg_mat = self.construct_arg_mat()
-        p_avg = self.construct_1dtond_matrix_small(len(mbin_chosen), m_min, m_max, p_avg_m1qchi * delta_ms,nbins_chi, nbins_q, arg_mat)
+        p_avg = self.construct_1dtond_matrix(len(mbin_chosen), p_avg_m1qchi * delta_ms,nbins_chi, nbins_q,  m_min, m_max, arg_mat)
         #print(p_avg)
         matrix1 = np.sum(p_avg, axis = 0)   
         
@@ -1606,125 +1571,6 @@ class Rates_spins_with_q(Utils_spins_with_q):
         '''
         Utils_spins_with_q.__init__(self,mbins,qbins,chi_bins,kappa=kappa) 
     
-    
-    def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
-        '''
-        Function that creates a pymc model that will sample the posterior 
-        for the correlated population model.
-                
-        Parameters
-        ----------
-        log_bin_centers                  ::    numpy.ndarray
-                                               array containing centers of each bin in log m1, q, chi_eff co-ordinates.
-                                               output of Utils.generate_log_bin_centers
-        
-        weights                          ::    numpy.ndarray
-                                               array containing the posterior weights of each event in each bin (shape is 
-                                               n_events,nbins).
-        
-        tril_vts                         ::    numpy.ndarray
-                                               array containing mean values of emperically estimated VTs. First output of
-                                               Vt_Utils_spins_with_q.compute_VTs 
-        
-        tril_deltaLogbins                ::    numpy.ndarray
-                                               1d array containing delta_log_bin corresponding to each bin in the 
-                                               lower triangular format of the output of Utils.arraynd_to_tril
-                                               
-        ls_mean_m                        ::    float
-                                               mean of the mass axis of the lengthscale for the single GP.
-                                               
-        ls_sd_m                          ::    float
-                                               std of the mass axis of the lengthscale for the single GP..
-                                               
-        ls_mean_q                        ::    float
-                                               mean of the mass-ratio axis of the lengthscale for the single GP.
-                                               
-        ls_sd_q                          ::    float
-                                               std of the mass-ratio axis of the lengthscale for the single GP.
-        
-        ls_mean_chi                        ::    float
-                                               mean of the chi_eff axis of the lengthscale for the single GP.
-                                               
-        ls_sd_chi                          ::    float
-                                               std of the chi_eff axis of the lengthscale for the single GP.
-        
-        sigma_sd                         ::    float
-                                               std of the sigma for GP. Default is 10
-        
-        mu_dim                         ::    int
-                                               number of mean functions for the GP. Can be 1
-                                               or None. Default is None which corresponds to mu_dim = 
-                                               number of bins.
-        
-        vt_sigmas                        ::    numpy.ndarray
-                                               1d array containing std values of emperically estimated
-                                               VTs. Second output of Vt_Utils_spins_with_q.compute_VTs. Default is 
-                                               None (Should not be None if vt_accuracy_check=True)
-        
-        
-        vt_accuracy_check                ::    bool
-                                               Whether or not to implement marginalization of Monte 
-                                               Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior. If False 
-                                               (default), samples from the posterior.
-        
-                                               
-        
-        Returns
-        -------
-        
-        gp_model  : pymc.Model object.
-                    model object for sampling the rate densities posterior.
-        '''
-        tril_vts = tril_vts*tril_deltaLogbins
-        arg = tril_vts>0.
-        if(len(np.where(~arg)[0])>0):
-            tril_vts = tril_vts[np.where(arg)[0]]
-            weights = weights[:,np.where(arg)[0]]
-            wt_means = wt_means[:,np.where(arg)[0]]
-            wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
-            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
-        
-        if vt_accuracy_check :
-            assert vt_sigmas is not None
-            vt_sigmas*=tril_deltaLogbins
-            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
-        
-        else:
-            n_eff = 1
-        
-        if mu_dim is None:
-            mu_dim=len(log_bin_centers)
-        assert mu_dim==1 or mu_dim==len(log_bin_centers)
-        
-        nchi= len(self.chi_bins)-1
-        # nm = len(self.mbins)-1
-        # nq = len(self.qbins)-1
-        nm = int(len(log_bin_centers)/(nchi))
-        assert nm == len(log_bin_centers)/nchi
-        #assert nm == len(log_bin_centers)/nchi
-        bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
-        log_bin_centers_m = log_bin_centers[0::nchi, :2]
-        with pm.Model() as gp_model:
-            mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
-            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
-            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
-            length_scale_q = pm.Lognormal('length_scale_q',mu=ls_mean_q,sigma=ls_sd_q)
-            length_scale_chi = pm.Lognormal('length_scale_chi',mu=ls_mean_chi,sigma=ls_sd_chi)
-            covariance_m = sigma * pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m, length_scale_q])
-            covariance_chi = sigma * pm.gp.cov.ExpQuad(input_dim=1,ls=length_scale_chi)
-            gp = pm.gp.LatentKron(cov_funcs=[covariance_m, covariance_chi]) 
-            logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_m, bin_centers_chi])
-            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
-            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
-            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
-            n_f_exp = n_corr_physical*tril_vts
-            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
-            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
-            n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
-            
-        return gp_model
-
 
     def make_significant_model_3d_prior_only(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None):
         '''
@@ -1852,7 +1698,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
             
         return gp_model
     
-    def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None, exponent = -30):
+    def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,mc_convergence_check=True, wt_means=None, wt_sigmas=None, exponent = -30):
         '''
         Function that creates a pymc model that will sample the posterior 
         for the correlated population model, with an additional likelihood 
@@ -1905,7 +1751,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
         vt_sigmas                        ::    numpy.ndarray
                                                1d array containing std values of emperically estimated
                                                VTs. Second output of Vt_Utils_spins_with_q.compute_VTs. Default is 
-                                               None (Should not be None if vt_accuracy_check=True)
+                                               None 
         
         wt_means                        ::    numpy.ndarray
                                                array containing mean values of posterior weights.
@@ -1917,11 +1763,11 @@ class Rates_spins_with_q(Utils_spins_with_q):
                                                Third output of Utils_spins_with_q.compute_weights. Default is 
                                                None (shape is n_events,nbins).                                              
         
-        vt_accuracy_check                ::    bool
-                                               Whether or not to implement marginalization of Monte 
-                                               Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior. If False 
-                                               (default), samples from the posterior.
+        mc_convergence_check             ::    bool
+                                               Whether or not to implement Monte Carlo
+                                               convergence penalty. If True (default),
+                                               implements the likelihood penalty. If False,
+                                               implements the standard sampling procedure.
         
         exponent                         ::    int
         					 Exponent determining the steepness of
@@ -1943,14 +1789,10 @@ class Rates_spins_with_q(Utils_spins_with_q):
             wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
             weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
         
-        if vt_accuracy_check :
-            assert vt_sigmas is not None
-            vt_sigmas*=tril_deltaLogbins
-            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
-        
-        else:
-            n_eff = 1
-        
+        assert vt_sigmas is not None
+        vt_sigmas*=tril_deltaLogbins
+        n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+    
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
         assert mu_dim==1 or mu_dim==len(log_bin_centers)
@@ -1977,15 +1819,16 @@ class Rates_spins_with_q(Utils_spins_with_q):
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
             n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
             n_f_exp = n_corr_physical*tril_vts
-            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp))
             log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
             Ndet =  pm.Deterministic('Ndet', tt.sum(n_f_exp, axis = -1))  #np.dot(n_corr_physical, tril_vts)
             denominator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
             numerator = tt.dot(wt_means, n_corr_physical)**2
             N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
-            n_eff_potential = pm.Potential('n_eff_potential', -tt.log1p((n_eff/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent)))
+            n_eff_potential = pm.Potential('n_eff_potential', (-tt.log1p((n_eff/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent))) * int(mc_convergence_check))
             
         return gp_model
 
     
+
 

@@ -1126,12 +1126,13 @@ class Rates(Utils):
             n_corr_z = pm.Deterministic('n_corr_z',tt.exp(logn_tot_z))
             
         return gp_model
+
     
-    def make_significant_model_3d(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False):
+    def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None,vt_sigmas=None,mc_convergence_check=True, wt_means=None, wt_sigmas=None, exponent = -30):
         '''
-        Function that creates a pymc model that will sample the posterior in 
-        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
-        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
+        Function that creates a pymc model that will sample the posterior 
+        for the correlated population model, with an additional likelihood 
+        penalty imposed to improve Monte Carlo convergence.
                 
         Parameters
         ----------
@@ -1174,111 +1175,7 @@ class Rates(Utils):
         vt_sigmas                        ::    numpy.ndarray
                                                1d array containing std values of emperically estimated
                                                VTs. Second output of Vt_Utils.compute_vts. Default is 
-                                               None (Should not be None if vt_accuracy_check=True)
-        
-        vt_accuracy_check                ::    bool
-                                               Whether or not to implement marginalization of Monte 
-                                               Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior on Eq. B11. If False 
-                                               (default), samples from the posterior in Eq. A6.
-        
-                                               
-        
-        Returns
-        -------
-        
-        gp_model  : pymc.Model object.
-                    model object for sampling the rate densities posterior.
-        '''
-        tril_vts = tril_vts*tril_deltaLogbins
-        arg = tril_vts>0.
-        if(len(np.where(~arg)[0])>0):
-            tril_vts = tril_vts[np.where(arg)[0]]
-            weights = weights[:,np.where(arg)[0]]
-            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
-        
-        if vt_accuracy_check :
-            assert vt_sigmas is not None
-            vt_sigmas*=tril_deltaLogbins
-            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
-        
-        else:
-            n_eff = 1
-        
-        if mu_dim is None:
-            mu_dim=len(log_bin_centers)
-        assert mu_dim==1 or mu_dim==len(log_bin_centers)
-        
-        nbins_m = int(len(self.mbins)*(len(self.mbins)-1)*0.5)
-        log_bin_centers_m = log_bin_centers[:nbins_m,:2]
-        log_bin_centers_z = log_bin_centers[0::nbins_m,2][:,None]
-        with pm.Model() as gp_model:
-            mu = pm.Normal('mu',mu=0,sigma=10,shape=mu_dim)
-            sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
-            length_scale_m = pm.Lognormal('length_scale_m',mu=ls_mean_m,sigma=ls_sd_m)
-            length_scale_z = pm.Lognormal('length_scale_z',mu=ls_mean_z,sigma=ls_sd_z)
-            covariance_m = sigma*pm.gp.cov.ExpQuad(input_dim=2,ls=[length_scale_m,length_scale_m])
-            covariance_z = sigma*pm.gp.cov.ExpQuad(input_dim=1,ls=[length_scale_z])
-            gp = pm.gp.LatentKron(cov_funcs=[covariance_z, covariance_m]) 
-            logn_corr = gp.prior('logn_corr',Xs=[log_bin_centers_z,log_bin_centers_m])
-            logn_tot = pm.Deterministic('logn_tot', mu+logn_corr)
-            n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
-            n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
-            n_f_exp = n_corr_physical*tril_vts
-            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
-            log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
-            n_eff_potential = pm.Potential('n_eff_potential', pm.math.switch(pm.math.le((int(vt_accuracy_check)*n_f_exp-2*n_eff).max(),0.),0.,-100))
-            
-        return gp_model
-    
-    def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_z, ls_sd_z,sigma_sd=10,mu_dim=None,vt_sigmas=None,vt_accuracy_check=False, wt_means=None, wt_sigmas=None, exponent = -30):
-        '''
-        Function that creates a pymc model that will sample the posterior in 
-        Eq. A6 (or B11 if vt_accuracy_check=True) of https://arxiv.org/abs/2304.08046
-        for the correlated population model in Eq. 2 and the GP prior in Eq. 5.
-                
-        Parameters
-        ----------
-        log_bin_centers                  ::    numpy.ndarray
-                                               array containing centers of each bin in log m1, log m2, z co-ordinates.
-                                               output of Utils.generate_log_bin_centers
-        
-        weights                          ::    numpy.ndarray
-                                               array containing the posterior weights of each event in each bin (shape is 
-                                               n_events,nbins).
-        
-        tril_vts                         ::    numpy.ndarray
-                                               array containing mean values of emperically estimated VTs. First output of
-                                               Vt_Utils.compute_vts 
-        
-        tril_deltaLogbins                ::    numpy.ndarray
-                                               1d array containing delta_log_bin corresponding to each bin in the 
-                                               lower triangular format of the output of Utils.arraynd_to_tril
-                                               
-        ls_mean_m                        ::    float
-                                               mean of the mass axis of the lengthscale for the single GP.
-                                               
-        ls_sd_m                          ::    float
-                                               std of the mass axis of the lengthscale for the single GP..
-                                               
-        ls_mean_z                        ::    float
-                                               mean of the redshift axis of the lengthscale for the single GP.
-                                               
-        ls_sd_z                          ::    float
-                                               std of the redshift axis of the lengthscale for the single GP.
-        
-        sigma_sd                         ::    float
-                                               std of the sigma for GP. Default is 10
-        
-        mu_z_dim                         ::    int
-                                               number of mean functions for the GP. Can be 1
-                                               or None. Default is None which corresponds to mu_dim = 
-                                               number of bins.
-        
-        vt_sigmas                        ::    numpy.ndarray
-                                               1d array containing std values of emperically estimated
-                                               VTs. Second output of Vt_Utils.compute_vts. Default is 
-                                               None (Should not be None if vt_accuracy_check=True)
+                                               None 
         
         wt_means                        ::    numpy.ndarray
                                                array containing mean values of posterior weights.
@@ -1290,11 +1187,11 @@ class Rates(Utils):
                                                Third output of Utils.compute_weights. Default is 
                                                None (shape is n_events,nbins).                                              
         
-        vt_accuracy_check                ::    bool
-                                               Whether or not to implement marginalization of Monte 
-                                               Carlo uncertainties in VT estimation. If True,
-                                               samples from the posterior. If False 
-                                               (default), samples from the posterior.
+        mc_convergence_check             ::    bool
+                                               Whether or not to implement Monte Carlo
+                                               convergence penalty. If True (default),
+                                               implements the likelihood penalty. If False,
+                                               implements the standard sampling procedure.
         
         exponent                         ::    int
         					 Exponent determining the steepness of
@@ -1317,13 +1214,9 @@ class Rates(Utils):
             wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
             weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
         
-        if vt_accuracy_check :
-            assert vt_sigmas is not None
-            vt_sigmas*=tril_deltaLogbins
-            n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
-        
-        else:
-            n_eff = 1
+        assert vt_sigmas is not None
+        vt_sigmas*=tril_deltaLogbins
+        n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
         
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
@@ -1345,13 +1238,13 @@ class Rates(Utils):
             n_corr = pm.Deterministic('n_corr',tt.exp(logn_tot))
             n_corr_physical = pm.Deterministic('n_corr_physical',n_corr[arg])
             n_f_exp = n_corr_physical*tril_vts
-            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp*(1.-0.5*int(vt_accuracy_check)*n_f_exp/n_eff)))
+            N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp))
             log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
             Ndet =  pm.Deterministic('Ndet', tt.sum(n_f_exp, axis = -1))  #np.dot(n_corr_physical, tril_vts)
             denominator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
             numerator = tt.dot(wt_means, n_corr_physical)**2
             N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
-            n_eff_potential = pm.Potential('n_eff_potential', -tt.log1p((n_eff/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent)))
+            n_eff_potential = pm.Potential('n_eff_potential', (-tt.log1p((n_eff/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent))) * int(mc_convergence_check))
             
         return gp_model
     

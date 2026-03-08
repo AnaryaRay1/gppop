@@ -19,7 +19,7 @@ parser.add_argument('--target_accept', type = float, required = True, metavar = 
 parser.add_argument('--njobs', type = int, required = True, metavar = 'TARGET_ACCEPT', help = 'number of chains to run sampling for')
 parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=1.)
 parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=1)
-parser.add_argument('--vt_accuracy_check', required = False, metavar = 'VT_ACCURACY_CHECK', help = 'Whether to marginalize over monte-carlo uncertainties in vt estimation',type=bool,default=False)
+parser.add_argument('--mc_convergence_check', required = False, metavar = 'MC_CONVERGENCE_CHECK', help = 'Whether to implement Monte Carlo convergence likelihood penalty',type=bool,default=True)
 args= parser.parse_args()
 
 with h5py.File(args.metadata,'r') as hf:
@@ -36,7 +36,7 @@ tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin, utils.construct_arg_mat())
 corr_posterior_model = rates.make_significant_model_3d_n_eff_opt
 
 
-gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scales_m[0],ls_sd_m=scales_m[1],ls_mean_q=scales_q[0],ls_sd_q=scales_q[1],ls_mean_chi=scales_chi[0],ls_sd_chi=scales_chi[1], sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, vt_accuracy_check = args.vt_accuracy_check, wt_means = wt_means, wt_sigmas = wt_sigmas)
+gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scales_m[0],ls_sd_m=scales_m[1],ls_mean_q=scales_q[0],ls_sd_q=scales_q[1],ls_mean_chi=scales_chi[0],ls_sd_chi=scales_chi[1], sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, mc_convergence_check = args.mc_convergence_check, wt_means = wt_means, wt_sigmas = wt_sigmas)
 
 
 
@@ -48,4 +48,5 @@ out_dir = '../output/'
 if not(os.path.exists(out_dir)):
     os.makedirs(out_dir)
 trace.to_netcdf('../output/gppop_GWTC4_posterior_newbins3_kappa_corr_m1qchi.nc')
+
 

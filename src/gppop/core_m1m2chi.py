@@ -1445,8 +1445,8 @@ class Rates_spins(Utils_spins):
             weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
         
         assert vt_sigmas is not None
-        vt_sigmas*=tril_deltaLogbins
-        n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
+        vt_sigmas = vt_sigmas[np.where(arg)[0]]
+        n_eff = tt.switch(tt.neq(vt_sigmas, 0), tt.true_div(tril_vts**2,vt_sigmas**2), 0)
         
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
@@ -1476,7 +1476,7 @@ class Rates_spins(Utils_spins):
             denominator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
             numerator = tt.dot(wt_means, n_corr_physical)**2
             N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
-            n_eff_potential = pm.Potential('n_eff_potential', (-tt.log1p((n_eff/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent))) * int(mc_convergence_check))
+            n_eff_potential = pm.Potential('n_eff_potential', (-tt.log1p((tt.sum(n_eff)/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent))) * int(mc_convergence_check))
             
         return gp_model
     

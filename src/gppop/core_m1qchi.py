@@ -13,6 +13,7 @@ from astropy import units as u
 from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
 import warnings
+import tqdm
 
 ############################
 #  Support Functions       #
@@ -1537,12 +1538,36 @@ class Vt_Utils_spins_with_q(Utils_spins_with_q):
         
         if log_p_s1s2 is None:
             log_p_s1s2 = np.zeros(len(inj_data_set['mass2_source'])).astype(bool)
-        log_pinjs = np.array(list(map(self.log_reweight_pinjection_mixture,inj_data_set['mass1_source'][selector],inj_data_set['mass2_source'][selector],inj_data_set['redshift'][selector], inj_data_set['spin1x'][selector],inj_data_set['spin1y'][selector],inj_data_set['spin1z'][selector], inj_data_set['spin2x'][selector],inj_data_set['spin2y'][selector], inj_data_set['spin2z'][selector],inj_data_set['sampling_pdf'][selector], inj_data_set['p_draw_chi_given_m1m2'][selector], inj_data_set['mixture_weight'][selector],log_p_s1s2[selector])))
         
-        vt_means = np.sum(np.array(list(map(reweight_pinjection,log_pinjs))),axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))/inj_data_set['total_generated']
+
+        n = len(selector)
+        mean_weights = np.zeros(len(self.generate_log_bin_centers()))
+        var_weights = np.zeros(len(self.generate_log_bin_centers()))
         
-        vt_vars = np.sum(np.array(list(map(reweight_pinjection,log_pinjs)))**2,axis=0)*(inj_data_set['analysis_time_s']/(365.25*24*3600))**2/inj_data_set['total_generated']**2 - vt_means**2/inj_data_set['total_generated']
+        for k, i in enumerate(tqdm.tqdm(selector, total=n)):
+            x = self.log_reweight_pinjection_mixture(
+                inj_data_set['mass1_source'][i],
+                inj_data_set['mass2_source'][i],
+                inj_data_set['redshift'][i],
+                inj_data_set['spin1x'][i],
+                inj_data_set['spin1y'][i],
+                inj_data_set['spin1z'][i],
+                inj_data_set['spin2x'][i],
+                inj_data_set['spin2y'][i],
+                inj_data_set['spin2z'][i],
+                inj_data_set['sampling_pdf'][i],
+                inj_data_set['p_draw_chi_given_m1m2'][i],
+                inj_data_set['mixture_weight'][i],
+                log_p_s1s2[i],
+            )
+            
+            mean_weights += np.where((x!=0), np.exp(x), 0 )
+            var_weights += np.where((x!=0), np.exp(x), 0 )**2
+            
         
+        vt_means = mean_weights * (inj_data_set['analysis_time_s']/(365.25*24*3600))/inj_data_set['total_generated'] 
+
+        vt_vars = var_weights * (inj_data_set['analysis_time_s']/(365.25*24*3600))**2/inj_data_set['total_generated']**2 - vt_means**2/inj_data_set['total_generated'] 
         vt_sigmas = np.sqrt(vt_vars)
         
         return vt_means, vt_sigmas
@@ -1698,7 +1723,7 @@ class Rates_spins_with_q(Utils_spins_with_q):
             
         return gp_model
     
-    def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None,mc_convergence_check=True, wt_means=None, wt_sigmas=None, exponent = -30):
+    def make_significant_model_3d_n_eff_opt(self,log_bin_centers,weights,tril_vts,tril_deltaLogbins, ls_mean_m, ls_sd_m,ls_mean_q, ls_sd_q,ls_mean_chi, ls_sd_chi,sigma_sd=1.,mu_dim=None,vt_sigmas=None, variance_cut=False, wt_means=None, wt_sigmas=None, exponent = -30, maximum_uncertainty = 1.0):
         '''
         Function that creates a pymc model that will sample the posterior 
         for the correlated population model, with an additional likelihood 
@@ -1763,11 +1788,11 @@ class Rates_spins_with_q(Utils_spins_with_q):
                                                Third output of Utils_spins_with_q.compute_weights. Default is 
                                                None (shape is n_events,nbins).                                              
         
-        mc_convergence_check             ::    bool
-                                               Whether or not to implement Monte Carlo
-                                               convergence penalty. If True (default),
-                                               implements the likelihood penalty. If False,
-                                               implements the standard sampling procedure.
+        variance_cut                     ::    bool
+                                               Whether or not to implement variance cut for monitoring Monte Carlo uncertainties.
+
+        maximum_uncertainty              ::    float
+                                               The maximum variance acceptable
         
         exponent                         ::    int
         					 Exponent determining the steepness of
@@ -1785,28 +1810,29 @@ class Rates_spins_with_q(Utils_spins_with_q):
         if(len(np.where(~arg)[0])>0):
             tril_vts = tril_vts[np.where(arg)[0]]
             weights = weights[:,np.where(arg)[0]]
+          
+        
+        if variance_cut :
+            assert vt_sigmas is not None and wt_sigmas is not None and wt_means is not None
             wt_means = wt_means[:,np.where(arg)[0]]
             wt_sigmas = wt_sigmas[:,np.where(arg)[0]]
-            weights/=np.sum(weights,axis=1).reshape(weights.shape[0],1)
+            vt_sigmas*=tril_deltaLogbins
+            vt_sigmas = vt_sigmas[np.where(arg)[0]]
         
-        assert vt_sigmas is not None
-        vt_sigmas = vt_sigmas[np.where(arg)[0]]
-
-        #n_eff = tt.as_tensor(tril_vts**2/vt_sigmas[np.where(arg)[0]]**2)
-        n_eff = tt.switch(tt.neq(vt_sigmas, 0), tt.true_div(tril_vts**2,vt_sigmas**2), 0)
+        else:
+            wt_sigmas = np.zeros_like(weights)
+            wt_means = weights
+            vt_sigmas = np.zeros_like(tril_vts)
         
         if mu_dim is None:
             mu_dim=len(log_bin_centers)
         assert mu_dim==1 or mu_dim==len(log_bin_centers)
         
         nchi= len(self.chi_bins)-1
-        # nm = len(self.mbins)-1
-        # nq = len(self.qbins)-1
         nm = int(len(log_bin_centers)/(nchi))
-        assert nm == len(log_bin_centers)/nchi
-        #assert nm == len(log_bin_centers)/nchi
         bin_centers_chi = log_bin_centers[0:nchi,2][:,None]
         log_bin_centers_m = log_bin_centers[0::nchi, :2]
+        
         with pm.Model() as gp_model:
             mu = pm.TruncatedNormal('mu', mu=0, sigma=10, lower=-8.0, upper=5.0, shape=mu_dim)
             sigma = pm.HalfNormal('sigma',sigma=sigma_sd)
@@ -1823,11 +1849,21 @@ class Rates_spins_with_q(Utils_spins_with_q):
             n_f_exp = n_corr_physical*tril_vts
             N_F_exp = pm.Deterministic('N_F_exp',tt.sum(n_f_exp))
             log_l = pm.Potential('log_l',tt.sum(tt.log(tt.dot(weights,n_corr_physical))) - N_F_exp)
-            Ndet =  pm.Deterministic('Ndet', tt.sum(n_f_exp, axis = -1))  #np.dot(n_corr_physical, tril_vts)
-            denominator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
-            numerator = tt.dot(wt_means, n_corr_physical)**2
-            N_eff_samp = pm.Deterministic('N_eff_samp', tt.min(numerator/denominator))
-            n_eff_potential = pm.Potential('n_eff_potential', (-tt.log1p((tt.sum(n_eff)/(2 * Ndet)) ** (exponent)) -tt.log1p((tt.log10(N_eff_samp)/0.6) ** (exponent))) * int(mc_convergence_check))
+            
+            
+            #Variance due to PE samples
+            numerator =  tt.sum((wt_sigmas*n_corr_physical)**2, axis = 1)
+            denominator = tt.dot(wt_means, n_corr_physical)**2
+            variance_pe = pm.Deterministic('var_pe', tt.sum(numerator/denominator))
+
+            #Variance due to selection samples
+            variance_selection = pm.Deterministic("var_n_det", tt.sum((n_corr_physical * vt_sigmas)**2))
+
+            #log likelihood variance
+            variance_log_l = pm.Deterministic("var_log_L", variance_pe+variance_selection+1e-10)
+
+            #Penalty
+            variance_penalty = pm.Potential('variance_cut', - int(variance_cut) * tt.log1p((maximum_uncertainty**2/variance_log_l) ** (exponent))) 
             
         return gp_model
 

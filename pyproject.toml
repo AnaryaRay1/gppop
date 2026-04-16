@@ -1,17 +1,17 @@
 [project]
 name = "gppop"  # Required
-version = "0.0.1"  # Required
-description = "Non-parametric inference of the population of compact binaries from gravitational wave observations using binned Gaussian processes. Methods paper: https://arxiv.org/abs/2304.08046"  # Optional
+version = "0.0.3"  # Required
+description = "Non-parametric inference of the population of compact binaries from gravitational wave observations using binned Gaussian processes. Methods papers: https://arxiv.org/abs/2304.08046, https://arxiv.org/abs/2404.03166, and, https://arxiv.org/abs/2511.22093."  # Optional
 readme = "README.md" # Optional
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
 authors = [
-  {name = "Anarya Ray", email = "anarya@uwm.edu" },
+  {name = "Anarya Ray", email = "anarya.ray@ligo.org" },
   {name = "Omkar Sridhar", email = "omkarnm1401@gmail.com" },
   {name = "Siddharth Mohite", email = "srmohite@uwm.edu" }
 ]
 maintainers = [
-  {name = "Anarya Ray", email = "anarya@uwm.edu" },
+  {name = "Anarya Ray", email = "anarya.ray@northwestern.edu" },
   {name = "Omkar Sridhar", email = "omkarnm1401@gmail.com" }
 ]
 
@@ -26,7 +26,7 @@ dependencies = [ # Optional
   "arviz == 0.14.0",
   "pesummary",
   "popsummary@git+https://git.ligo.org/zoheyr-doctor/popsummary.git",
-  "gwdistributions@git+https://git.ligo.org/reed.essick/gw-distributions.git"
+  "gw-distributions@git+https://git.ligo.org/reed.essick/gw-distributions.git"
 ]
 
 [tool.poetry.scripts]

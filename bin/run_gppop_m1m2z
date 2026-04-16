@@ -1,0 +1,55 @@
+#!/usr/bin/env python
+import argparse
+from gppop import core_m1m2z
+import numpy as np
+import pymc as pm
+import os
+import sys
+import yaml
+import h5py
+
+
+#os.chdir('../examples/BGP_m1m2z/data/')
+np.random.seed(123456)
+parser = argparse.ArgumentParser(description = 'Fit the Gaussian Process model to the observed source population.', formatter_class = argparse.ArgumentDefaultsHelpFormatter, fromfile_prefix_chars='@')
+parser.add_argument('--metadata', type = str, required = True, metavar = 'METADATA', help = 'name of metadata file')
+parser.add_argument('--ntune', type = int, required = True, metavar = 'NTUNE', help = 'Number of tuning steps for the sampler.')
+parser.add_argument('--nsteps', type = int, required = True, metavar = 'NSTEPS', help = 'Number of steps to sample post tuning.')
+parser.add_argument('--target_accept', type = float, required = True, metavar = 'TARGET_ACCEPT', help = 'Target acceptance fraction for the sampler.')
+parser.add_argument('--njobs', type = int, required = True, metavar = 'TARGET_ACCEPT', help = 'number of chains to run sampling for')
+parser.add_argument('--sigma_sd', required = False, metavar = 'SIGMA_SD', help = 'the sd of the prior on GP sigma',type=float,default=1.)
+parser.add_argument('--mu_dim', required = False, metavar = 'MU_DIM', help = 'the dimensionality of the mean of the redshift GP for uncorrelated inference or of the full GP in correlated inference',type=int,default=1)
+parser.add_argument('--mc_convergence_check', required = False, metavar = 'MC_CONVERGENCE_CHECK', help = 'Whether to implement Monte Carlo convergence likelihood penalty through a variance cut',type=bool,default=True)
+parser.add_argument('--exponent', required = False, metavar = 'Exponent', help = 'exponent to use for the likelihood penalty',type=int,default=-30)
+parser.add_argument('--maximum_uncertainty', required = False, metavar = 'Maximum_Uncertainty', help = 'Maximum allowed variance of the log-likelihood function',type=float,default=1.0)
+args= parser.parse_args()
+
+with h5py.File(args.metadata,'r') as hf:
+    gppop_data = hf['gppop_metadata']
+    mbins, zbins, scales_m, scales_z, weights, total_vts, vt_means,total_vt_sigmas, wt_means, wt_sigmas = gppop_data['mbins'][()],gppop_data['zbins'][()],gppop_data['scales_m'][()],gppop_data['scales_z'][()], gppop_data['posterior_weights'][()],gppop_data['vts'][()],gppop_data['vt_means'][()], gppop_data['vt_sigmas'][()], gppop_data['wt_means'][()], gppop_data['wt_sigmas'][()]
+
+utils = core_m1m2z.Utils(mbins,zbins)
+rates = core_m1m2z.Rates(mbins,zbins)
+
+log_bin_centers = utils.generate_log_bin_centers()
+deltaLogbin = utils.deltaLogbin()
+tril_deltaLogbin = utils.arraynd_to_tril(deltaLogbin)
+
+
+corr_posterior_model = rates.make_significant_model_3d_n_eff_opt
+
+
+gp_model = corr_posterior_model(log_bin_centers=log_bin_centers,weights=weights,tril_vts=total_vts,tril_deltaLogbins=tril_deltaLogbin,ls_mean_m=scales_m[0],ls_sd_m=scales_m[1],ls_mean_z=scales_z[0],ls_sd_z=scales_z[1], sigma_sd=args.sigma_sd,mu_dim=args.mu_dim,vt_sigmas = total_vt_sigmas, variance_cut = args.mc_convergence_check, wt_means = wt_means, wt_sigmas = wt_sigmas,  exponent = args.exponent, maximum_uncertainty = args.maximum_uncertainty)
+
+
+
+print('start sampling posterior')
+with gp_model:
+    trace = pm.sample(draws=args.nsteps,tune=args.ntune,chains=args.njobs,target_accept=args.target_accept,discard_tuned_samples=True)
+
+out_dir = 'output/'
+if not(os.path.exists(out_dir)):
+    os.makedirs(out_dir)
+trace.to_netcdf('output/gppop_GWTC4_posterior_newbins3_kappa_corr_m1m2z.nc')
+
+

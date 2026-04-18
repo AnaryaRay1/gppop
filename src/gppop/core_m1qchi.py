@@ -789,6 +789,75 @@ class Post_Proc_Utils_spins_with_q(Utils_spins_with_q):
         print(Rpq.shape)
         return mrat,Rpq[:,1:]
 
+    def get_Rpq_corr_m1complement_chi(self, n_corr,delta_logm1_array,delta_chi_array,m1_bins,q_bins,log_bin_centers,m1_low,m1_high,chi_low,chi_high):
+        '''
+        Function for computing conditional mass-ratio population: p(q|m1, chi_eff)
+        evaluated at primary masses and effective spins belonging to some range
+
+        Parameters
+        ----------
+
+        n_corr                  ::   numpy.ndarray
+                                     array containing rate density in each bin
+
+        delta_logm1_array       ::   numpy.ndarray
+                                     1d array of delta log(m1)'s
+                                     
+        delta_chi_array       ::   numpy.ndarray
+                                     1d array of delta chieff's                             
+
+        m1_bins                 ::   numpy.ndarray
+                                     1d array containing primary mass bin edges
+
+        q_bins                 ::   numpy.ndarray
+                                     1d array containing mass-ratio bin edges
+
+        log_bin_centers         ::   numpy.ndarray
+                                     array containing log of the centers of each bin
+
+        m1_low                 ::   float 
+                                     lower edge of mass bin
+                                     
+        m1_high                ::   float 
+                                     upper edge of mass bin
+                                     
+        chi_low                 ::   float 
+                                     lower edge of chi_eff bin
+                                     
+        chi_high                ::   float 
+                                     upper edge of chi_eff bin                             
+
+
+        Returns
+        -------
+        mrat     :   numpy.ndarray
+                      1d array of mass-ratios at which p(q|m1, chi_eff) is evaluated
+        Rpq      :   numpy.ndarray
+                      1d array of p(q|m1, chi_eff) evaluated at the above q values and
+                      at m1,chieff's belonging to a particular range
+
+        '''
+        Rpq = np.zeros([len(n_corr),1])
+        mrat = np.array([])
+        for i in range(len(q_bins)-1):
+                #m1_low = m1_bins[0]
+                #m1_high = m1_bins[-1]
+                q_low = q_bins[i]
+                q_high = q_bins[i+1]
+                #m_array = np.linspace(m1_low,m1_high,100)[:-1]
+                m_array = np.ones(99)
+                q_array = np.linspace(q_low,q_high,100)[:-1]
+                idx_array = np.arange(len(log_bin_centers))
+                bin_idx = idx_array[(~((log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))))&
+                       (log_bin_centers[:,1]>=q_low)&(log_bin_centers[:,1]<=q_high)&(log_bin_centers[:,2]>=chi_low)&(log_bin_centers[:,2]<=chi_high)]
+                rate_density_array = n_corr[:,bin_idx]
+                delta_logm1s = delta_logm1_array[bin_idx]
+                delta_chis= delta_chi_array[bin_idx]
+                Rpq = np.concatenate((Rpq,(np.sum(rate_density_array*((delta_logm1s*delta_chis)[None,:]),axis=1)[:,None]/(m_array[None,:]))),axis=1)
+
+                mrat = np.append(mrat,q_array)
+        print(Rpq.shape)
+        return mrat,Rpq[:,1:]
 
     def get_Rpchi_q(self,log_bin_centers,n_corr_samples,chi_bins,dm1,dq,q_min,q_max):
         '''

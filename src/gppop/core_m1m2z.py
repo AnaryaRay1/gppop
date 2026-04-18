@@ -633,7 +633,7 @@ class Post_Proc_Utils(Utils):
                 mass2 = np.append(mass2,m_array)
         return mass2,Rpm2[:,1:]
     
-    def get_Rz(self,n_corr,delta_logm2_array,delta_logm1_array,m1_bins,m2_bins,z_bins,log_bin_centers):
+    def get_Rz(self,n_corr,delta_logm2_array,delta_logm1_array,m1_bins,m2_bins,z_bins,log_bin_centers, m1_low = None, m1_high = None, m2_low = None, m2_high = None):
         '''
         Function for computing the redshift evolution of the merger rate R(z)
         (obtained by integrating dR/dm1dm2 over m1 and m2)
@@ -680,10 +680,10 @@ class Post_Proc_Utils(Utils):
         for i in range(len(z_bins)-1):
             z_low = z_bins[i]
             z_high = z_bins[i+1]
-            m2_low = m2_bins[0]
-            m2_high = m2_bins[-1]
-            m1_low = m1_bins[0]
-            m1_high = m1_bins[-1]
+            m2_low = m2_bins[0] if m2_low is None else m2_low
+            m2_high = m2_bins[-1] if m2_high is None else m2_high
+            m1_low = m1_bins[0] if m1_low is None else m1_low
+            m1_high = m1_bins[-1] if m1_high is None else m1_high
             idx_array = np.arange(len(log_bin_centers))
             z_array = np.linspace(z_low,z_high,100)
             bin_idx = idx_array[(log_bin_centers[:,0]>=np.log(m1_low))&(log_bin_centers[:,0]<=np.log(m1_high))&

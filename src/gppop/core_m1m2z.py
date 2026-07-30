@@ -177,8 +177,8 @@ class Utils():
                 wgt_means[inds[0],inds[1],inds[2]] += pz_weight[i]/(m1_samples[i]*m2_samples[i]) / len(samples)
         indices = zip(m1_indices,m2_indices,z_indices)
         for i,inds in enumerate(indices):
-                    wgt_sigmas[inds[0],inds[1],inds[2]] += ((pz_weight[i]/(m1_samples[i] * m2_samples[i])) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2)
-        wgt_sigmas = np.sqrt(wgt_sigmas)
+                    wgt_sigmas[inds[0],inds[1],inds[2]] += ((pz_weight[i]/(m1_samples[i] * m2_samples[i])) ** 2 / len(samples) ** 2)
+        wgt_sigmas = np.sqrt(wgt_sigmas-wgt_means**2/len(samples))
         weights /= sum(sum(sum(weights)))
         return weights, wgt_means, wgt_sigmas
 
@@ -780,6 +780,51 @@ class Post_Proc_Utils(Utils):
         n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
         n_corr_at_idx[:,bin_idx] = n_corr[:,bin_idx]
         p_m1m2z = n_corr_at_idx * (Planck15.differential_comoving_volume(zs).to(u.Gpc**3/u.sr).value/(1+zs))/m1s/m2s
+        return p_m1m2z
+
+
+    def get_Rm1m2z(self,n_corr,m1s,m2s,zs,tril_edges):
+        '''
+        Function for computing p(m1,m2,z) = dN/dm1dm2dz as afunction of
+        m1,m2,z. Implements Eq.2 or Eq.8 of https://arxiv.org/pdf/2304.08046.pdf
+        
+        Parameters
+        ----------
+        
+        n_corr                  ::   numpy.ndarray
+                                     2d array containing rate density samples in each bin
+                                     of shape (nsamples,nbins)
+                                     
+        m1s                     ::   numpy.ndarray
+                                     1d array containing values of primary mass m1 at which to evalute p(m1,m2,z)
+                                     
+        m2s                     ::   numpy.ndarray
+                                     1d array containing values of secondary mass m2 at which to evalute p(m1,m2,z)
+        
+        zs                      ::   numpy.ndarray
+                                     1d array containing values of redshift z at which to evalute p(m1,m2,z)
+        
+        tril_edges              ::   numpy.ndarray
+                                     array containing values of m1 bin edges in lower triangular format
+                                     (output of Utils.tril_edges() function)
+        
+        Returns
+        -------
+        
+        p_m1m2z   : numpy.ndarray
+                    1d array containing p(m1,m2,z) evaluated at the supplied values of m1s, m2s and zs
+        '''
+        idx_array = np.arange(len(tril_edges))
+        
+        tbin_idx = [idx_array[(tril_edges[:,0,0]<=m1)&(tril_edges[:,1,0]>=m1)&
+                   (tril_edges[:,0,1]<=m2)&(tril_edges[:,1,1]>=m2)&(tril_edges[:,0,2]<=z)&(tril_edges[:,1,2]>=z)] for m1,m2,z in zip(m1s,m2s,zs)]
+        idx_array = np.array([len(bi)>0 for bi in tbin_idx])
+        bin_idx = np.array([bi[0] for bi in tbin_idx  if len(bi)>0])
+        
+        n_corr_at_idx = np.zeros((n_corr.shape[0],len(m1s)))
+        n_corr_at_idx[:,idx_array] = n_corr[:,bin_idx]
+        p_m1m2z = n_corr_at_idx /m1s/m2s
+        
         return p_m1m2z
     
     

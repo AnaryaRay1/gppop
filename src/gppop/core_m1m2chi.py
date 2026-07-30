@@ -213,9 +213,8 @@ class Utils_spins():
                     wgt_sigmas[inds[0],inds[1],inds[2]] += ((pz_weight[i]/(m1_samples[i] * m2_samples[i])) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2)
         else:
             for i,inds in enumerate(indices):
-                    wgt_sigmas[inds[0],inds[1],inds[2]-1] +=  float(inds[2]>0)*((pz_weight[i]/(m1_samples[i] * m2_samples[i])) ** 2 / len(samples) ** 2 - wgt_means[inds[0],inds[1],inds[2]] ** 2 / len(samples) ** 2)
-                    
-        wgt_sigmas = np.sqrt(wgt_sigmas)
+                    wgt_sigmas[inds[0],inds[1],inds[2]-1] +=  float(inds[2]>0)*((pz_weight[i]/(m1_samples[i] * m2_samples[i])) ** 2 / len(samples) ** 2 )
+        wgt_sigmas = np.sqrt(wgt_sigmas-wgt_means**2/len(samples))
         weights /= sum(sum(sum(weights)))
         return weights, wgt_means, wgt_sigmas
 

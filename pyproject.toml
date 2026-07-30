@@ -1,6 +1,6 @@
 [project]
 name = "gppop"  # Required
-version = "0.0.3"  # Required
+version = "0.0.4"  # Required
 description = "Non-parametric inference of the population of compact binaries from gravitational wave observations using binned Gaussian processes. Methods papers: https://arxiv.org/abs/2304.08046, https://arxiv.org/abs/2404.03166, and, https://arxiv.org/abs/2511.22093."  # Optional
 readme = "README.md" # Optional
 requires-python = ">=3.9"
